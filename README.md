@@ -31,6 +31,9 @@ The browser opens at <http://127.0.0.1:5100>. Then:
    Cameras that cannot start (e.g. no ROI yet) are reported by name and do not stop the others.
 5. **Gallery** tab - browse, filter, enlarge and delete everything captured.
 
+**Theme:** dark by default (neutral grey, same palette as the VIDES frontend); the sun/moon button in the header
+switches to a light theme and remembers your choice.
+
 Requirements: Python 3.10+ (developed on 3.11/3.13), Windows or Linux. A GPU is optional (CPU works, slower).
 
 ---
@@ -165,4 +168,5 @@ Details for contributors and AI assistants: [`docs/ARCHITECTURE.md`](docs/ARCHIT
 
 Detection by [Ultralytics YOLO](https://github.com/ultralytics/ultralytics) (AGPL-3.0 - check its terms for
 your use). Icons: [Font Awesome Free 6.5.2](https://fontawesome.com) (icons CC BY 4.0, fonts SIL OFL 1.1,
-code MIT), bundled locally in `frontend/static/vendor/fontawesome` so the UI works offline.
+code MIT), bundled locally in `frontend/static/vendor/fontawesome`. Font: DM Sans (SIL OFL 1.1) in
+`frontend/static/vendor/fonts`. Both are local, so the UI works offline.

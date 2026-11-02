@@ -40,6 +40,16 @@ async function api(path, opts = {}) {
   return opts.raw ? res : data;
 }
 
+/* Theme: dark by default; the choice is remembered. The icon shows the theme you would switch TO. */
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  $("#theme-toggle i").className = t === "dark" ? "fa-solid fa-sun" : "fa-solid fa-moon";
+  try { localStorage.setItem("theme", t); } catch (e) { /* storage unavailable */ }
+}
+$("#theme-toggle").addEventListener("click", () =>
+  applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light"));
+applyTheme(document.documentElement.dataset.theme || "dark");
+
 const tabs = { live: {}, roi: {}, cameras: {}, gallery: {}, settings: {} };
 function showTab(name) {
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === name));

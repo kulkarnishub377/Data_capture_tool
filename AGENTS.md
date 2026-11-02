@@ -31,7 +31,7 @@ real `config.ini` or `data/cameras.json` (it holds a real camera URL with a pass
 - **Never expose camera passwords**: API responses go through `public()` / `storage.mask_url`.
 - **Paths from clients** must go through `storage.safe_capture_path`.
 - **Frontend**: no framework, no build step, no `innerHTML`; build DOM with `h()`. Settings edits are a *draft*
-  applied only by "Save & restart". Icons are Font Awesome (vendored). The page has no JS test runner here;
+  applied only by "Save & restart". Icons are Font Awesome (vendored). Colours come only from the CSS variables at the top of `static/css/app.css` (dark default = VIDES palette, light via `[data-theme=light]`); never hard-code UI colours in JS/HTML (the ROI polygon colours in `roi.js` are intentional annotation colours). The page has no JS test runner here;
   UI changes were verified by driving headless Chrome over the DevTools protocol.
 - **Duplicate logic** (`dedup.py`) deliberately only compares against *recently active* saved vehicles. Do not make
   it remember saves for long: that drops every later car in the same lane (a real bug that was fixed).
