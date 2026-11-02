@@ -52,7 +52,7 @@ last sighting. IoU > 0.5 or pHash Hamming distance <= 6 inside that window means
 ## Frontend (`frontend/`)
 
 Plain HTML/CSS/JS, no build step, no framework. `index.html` + `static/js/{app,live,roi,cameras,gallery,settings}.js`.
-`app.js` holds helpers (`h()` DOM builder, `api()`, `toast`, `showTab`, shared lightbox, `debounce`, `timeAgo`).
+The Live tab toolbar (`live.js`) calls `/api/capture/start-all` and `/api/capture/stop-all` and stores the chosen cameras-per-row layout in `localStorage` (`liveCols`). `app.js` holds helpers (`h()` DOM builder, `api()`, `toast`, `showTab`, shared lightbox, `debounce`, `timeAgo`).
 Each tab registers `tabs.<name>.onShow`. All DOM is built with `h()`/`textContent` (no `innerHTML`). Font Awesome
 is vendored in `static/vendor/fontawesome`. Settings uses a *draft* object and sends it once on Save & restart.
 Deep links: `/#settings`, `/#live`, ...

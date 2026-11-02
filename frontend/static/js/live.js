@@ -32,8 +32,14 @@
     img.addEventListener("error", () => {
       if (c.running) setTimeout(() => { if (c.running) img.src = `/api/stream/${cam.id}?t=${Date.now()}`; }, 1500);
     });
+    const fs = h("button", { class: "fs", type: "button", title: "Full screen", "aria-label": `Full screen: ${cam.name}` },
+      h("i", { class: "fa-solid fa-expand" }));
+    fs.addEventListener("click", () => {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else if (view.requestFullscreen) view.requestFullscreen();
+    });
     c.el = h("div", { class: "cam" }, view,
-      h("div", { class: "meta" }, h("span", { class: "name" }, cam.name), chip, count, btn));
+      h("div", { class: "meta" }, h("span", { class: "name" }, cam.name), chip, count, fs, btn));
     return c;
   }
 
@@ -90,6 +96,7 @@
       grid.append(cards[cam.id].el);
     });
     $("#live-empty").hidden = cams.length > 0;
+    $("#cam-count").textContent = cams.length ? `(${cams.length})` : "";
     await poll();
   }
 
@@ -123,6 +130,42 @@
     $("#recent-empty").hidden = ordered.length > 0;
     $("#recent-count").textContent = ordered.length ? `latest ${ordered.length}` : "";
   }
+
+  // ---------------------------------------------------------------- toolbar: start/stop all + layout
+  function setCols(v) {
+    const grid = $("#live-grid");
+    document.querySelectorAll("#seg-cols button").forEach(b => b.setAttribute("aria-checked", String(b.dataset.value === v)));
+    grid.classList.toggle("fixed", v !== "auto");
+    if (v !== "auto") grid.style.setProperty("--cols", v);
+    try { localStorage.setItem("liveCols", v); } catch (e) { /* storage unavailable */ }
+  }
+  $("#seg-cols").addEventListener("click", e => {
+    const b = e.target.closest("button[data-value]");
+    if (b) setCols(b.dataset.value);
+  });
+  try { setCols(localStorage.getItem("liveCols") || "auto"); } catch (e) { setCols("auto"); }
+
+  async function bulk(path, button) {
+    button.disabled = true;
+    try { return await api(path, { method: "POST" }); }
+    catch (e) { return null; }
+    finally { button.disabled = false; poll(); }
+  }
+  $("#start-all").addEventListener("click", async () => {
+    const r = await bulk("/capture/start-all", $("#start-all"));
+    if (!r) return;
+    const problems = Object.values(r.results).filter(x => x.error).map(x => `${x.name}: ${x.error}`);
+    const parts = [];
+    if (r.started) parts.push(`Started ${r.started}`);
+    if (r.already_running) parts.push(`${r.already_running} already running`);
+    if (r.skipped) parts.push(`${r.skipped} disabled`);
+    if (problems.length) toast(`${parts.join(", ") || "Nothing started"} - could not start: ${problems.join("; ")}`, true);
+    else toast(parts.join(", ") || "No cameras to start");
+  });
+  $("#stop-all").addEventListener("click", async () => {
+    const r = await bulk("/capture/stop-all", $("#stop-all"));
+    if (r) toast(r.stopped ? `Stopped ${r.stopped} camera${r.stopped === 1 ? "" : "s"}` : "No cameras were running");
+  });
 
   tabs.live.onShow = async () => {
     try { await loadSummary(); await buildGrid(); } catch (e) { /* toast shown */ }

@@ -27,7 +27,8 @@ The browser opens at <http://127.0.0.1:5100>. Then:
 2. **ROI** tab - choose the camera, **Load snapshot**, click to place polygon points (drag to adjust).
    Use **+ New ROI** to draw more areas on the same camera. **Save ROIs**.
 3. **Settings** tab - pick the model, device, classes and thresholds, then **Save & restart**.
-4. **Live** tab - press **Start** on a camera. Captured vehicles appear in **Recent captures** on the right.
+4. **Live** tab - press **Start** on a camera (or **Start all**). Captured vehicles appear in **Recent captures** on the right.
+   Cameras that cannot start (e.g. no ROI yet) are reported by name and do not stop the others.
 5. **Gallery** tab - browse, filter, enlarge and delete everything captured.
 
 Requirements: Python 3.10+ (developed on 3.11/3.13), Windows or Linux. A GPU is optional (CPU works, slower).
@@ -38,7 +39,7 @@ Requirements: Python 3.10+ (developed on 3.11/3.13), Windows or Linux. A GPU is 
 
 | Tab | What it does |
 |---|---|
-| **Live** | Settings summary, one live card per camera (video with ROI and detection boxes, status, counters, Start/Stop), and a **Recent captures** panel with thumbnails + class tags. Click a thumbnail to enlarge or delete. |
+| **Live** | Settings summary; a camera toolbar with **Start all / Stop all** and a **Layout** selector (Auto, or 1-4 cameras per row, remembered); one live card per camera (video with ROI and detection boxes, status, counters, **full-screen** button, Start/Stop); and a **Recent captures** panel with thumbnails + class tags. Click a thumbnail to enlarge or delete. |
 | **ROI** | Draw one or more polygons per camera on a fresh snapshot. A vehicle is captured when it is inside **any** ROI. |
 | **Cameras** | Add / enable / test / delete cameras. Passwords are masked in the UI. |
 | **Gallery** | Browse all captures with camera / date / class filters and paging. |

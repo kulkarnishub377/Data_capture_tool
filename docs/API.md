@@ -28,6 +28,8 @@ Camera objects returned by the API have the RTSP password replaced by `****`.
 |---|---|
 | `POST /api/capture/<id>/start` | 400 if no ROI / model missing / model unloadable. `{ok,device,warnings}`; `{ok,already_running}` if running. Replaces a worker in `error`. |
 | `POST /api/capture/<id>/stop` | `{ok}` |
+| `POST /api/capture/start-all` | Starts every **enabled** camera. `{started, failed, skipped, already_running, results:{<id>:{name, ok\|error\|skipped\|already_running}}}`. A camera that cannot start (no ROI, model missing) is reported, never fatal. |
+| `POST /api/capture/stop-all` | Stops all running cameras in parallel. `{stopped: n}` |
 | `GET /api/capture/status` | `{<id>: {state, message, saved, skipped, device}}`. `state`: `connected`, `reconnecting`, `restarting`, `stopping`, `stopped`, `error`. Counters include previous workers of the same camera. |
 | `GET /api/stream/<id>` | MJPEG (`multipart/x-mixed-replace`) live preview with ROI + boxes; 404 if never started; survives restarts |
 

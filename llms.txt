@@ -10,6 +10,7 @@ Key facts for tools and agents:
 - Backend in `backend/`, frontend in `frontend/`. No build step, no database.
 - Duplicate protection: track lock + ID-switch guard (IoU/pHash against recently active saves only).
 - Settings apply only when the user presses "Save & restart" (one restart, counters + images kept).
+- Live tab: Start all / Stop all, cameras-per-row layout, per-camera full screen, recent-captures panel.
 
 ## Docs
 - [README](README.md): install, usage, every setting, troubleshooting

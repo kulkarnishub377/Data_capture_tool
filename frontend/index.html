@@ -34,6 +34,20 @@
 
     <div class="live-layout">
       <div>
+        <div class="live-toolbar">
+          <strong><i class="fa-solid fa-video"></i> Cameras <span id="cam-count" class="hint"></span></strong>
+          <span class="spacer"></span>
+          <button id="start-all" class="btn primary" title="Start every enabled camera"><i class="fa-solid fa-play"></i> Start all</button>
+          <button id="stop-all" class="btn danger" title="Stop every running camera"><i class="fa-solid fa-stop"></i> Stop all</button>
+          <span class="hint">Layout</span>
+          <div class="seg" id="seg-cols" role="radiogroup" aria-label="Cameras per row">
+            <button type="button" role="radio" data-value="auto" title="Automatic"><i class="fa-solid fa-table-cells-large"></i> Auto</button>
+            <button type="button" role="radio" data-value="1" title="1 camera per row">1</button>
+            <button type="button" role="radio" data-value="2" title="2 cameras per row">2</button>
+            <button type="button" role="radio" data-value="3" title="3 cameras per row">3</button>
+            <button type="button" role="radio" data-value="4" title="4 cameras per row">4</button>
+          </div>
+        </div>
         <div id="live-grid" class="grid"></div>
         <p id="live-empty" class="empty" hidden>No cameras yet. Add one in the Cameras tab.</p>
       </div>
