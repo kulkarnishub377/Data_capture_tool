@@ -171,6 +171,7 @@
     "#adv-minbox": ["MIN_BOX", v => parseInt(v, 10)],
     "#adv-overlap": ["MIN_ROI_OVERLAP", parseFloat],
     "#adv-dedup": ["DEDUP_SECONDS", parseFloat],
+    "#adv-maxhold": ["MAX_HOLD_SECONDS", parseFloat],
     "#adv-jpeg": ["JPEG_QUALITY", v => parseInt(v, 10)],
     "#adv-imgsz": ["IMG_SIZE", v => parseInt(v, 10)],
   };

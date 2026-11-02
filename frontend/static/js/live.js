@@ -12,7 +12,7 @@
     const items = [
       ["Model", s.MODEL], ["Device", s.DEVICE], ["Confidence", s.CONF_THRESH],
       ["Classes", s.CLASSES.length ? `${s.CLASSES.length} selected` : "default"],
-      ["Save", SAVE_TEXT[s.SAVE_MODE] || s.SAVE_MODE], ["When", s.WHEN === "first" ? "First in ROI" : "Best frame"],
+      ["Save", SAVE_TEXT[s.SAVE_MODE] || s.SAVE_MODE], ["When", s.WHEN === "first" ? "First frame" : "Best frame (buffered)"],
       ["Metadata", s.SAVE_METADATA ? "Keep" : "Off"],
     ];
     $("#sum-items").replaceChildren(...items.map(([k, v]) => h("span", { class: "sum" }, h("b", {}, k), " ", String(v))));

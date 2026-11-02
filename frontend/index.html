@@ -211,11 +211,11 @@
 
           <div class="srow" data-keys="WHEN">
             <div class="slabel"><label id="lbl-when">Capture moment</label>
-              <small>First in ROI saves the first good frame. Best frame waits and saves the largest, most confident one before the vehicle leaves.</small></div>
+              <small><b>Best frame</b> keeps the best view of each vehicle in a buffer and replaces it whenever a better frame arrives (the older one is dropped); it is saved once, when the vehicle leaves the ROI. <b>First frame</b> saves instantly: faster, but a lower-quality view and more duplicates.</small></div>
             <div class="sctl">
               <div class="seg" id="seg-when" data-key="WHEN" role="radiogroup" aria-labelledby="lbl-when">
-                <button type="button" role="radio" data-value="first"><i class="fa-solid fa-bolt"></i> First in ROI</button>
-                <button type="button" role="radio" data-value="best"><i class="fa-solid fa-star"></i> Best frame</button>
+                <button type="button" role="radio" data-value="best"><i class="fa-solid fa-star"></i> Best frame (buffered)</button>
+                <button type="button" role="radio" data-value="first"><i class="fa-solid fa-bolt"></i> First frame (instant)</button>
               </div>
             </div>
           </div>
@@ -246,8 +246,13 @@
           </div>
           <div class="srow" data-keys="DEDUP_SECONDS">
             <div class="slabel"><label for="adv-dedup">Duplicate window</label>
-              <small>The same vehicle is not saved again if it reappears within this time after it was last seen (tracker ID switches). Keep it small so the next car in the lane is still captured.</small></div>
+              <small>If the tracker loses a vehicle and gives it a new ID, a track that appears where the vehicle was expected within this time is treated as the SAME vehicle (not saved twice). Keep it small so the next car in the lane is still captured.</small></div>
             <div class="sctl"><div class="unit"><input type="number" id="adv-dedup" min="0" max="120" step="0.5"><span>sec</span></div></div>
+          </div>
+          <div class="srow" data-keys="MAX_HOLD_SECONDS">
+            <div class="slabel"><label for="adv-maxhold">Maximum wait</label>
+              <small>A vehicle that stays inside the ROI (stopped, or in traffic) is saved after this long, using its best frame so far.</small></div>
+            <div class="sctl"><div class="unit"><input type="number" id="adv-maxhold" min="1" max="600" step="1"><span>sec</span></div></div>
           </div>
           <div class="srow" data-keys="JPEG_QUALITY">
             <div class="slabel"><label for="adv-jpeg">JPEG quality</label>
