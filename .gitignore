@@ -1,0 +1,11 @@
+config.ini
+data/
+captures/
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.pt
+*.onnx
+*.engine
+.pytest_cache/
