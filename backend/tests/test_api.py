@@ -23,7 +23,7 @@ class FakeWorker:
         self.running = False
 
     def status(self):
-        return {"state": "connected" if self.running else "stopped", "saved": 0, "skipped": 0,
+        return {"state": "connected" if self.running else "stopped", "saved": getattr(self, "saved", 0), "skipped": 0,
                 "message": "", "device": self.device}
 
     def latest_jpeg(self):
@@ -246,3 +246,76 @@ def test_rois_with_an_invalid_polygon_rejected(env):
     tri = [[0, 0], [9, 0], [9, 9]]
     r = c.put(f"/api/cameras/{cam['id']}/roi", json={"rois": [tri, [[0, 0], [1, 1]]], "frame_size": [640, 480]})
     assert r.status_code == 400
+
+
+import time as _time
+
+
+def _wait(cond, timeout=3.0):
+    t = _time.time()
+    while _time.time() - t < timeout:
+        if cond():
+            return True
+        _time.sleep(0.02)
+    return False
+
+
+def _running_cam(c):
+    cam = _ready_cam(c)
+    assert c.post(f"/api/capture/{cam['id']}/start").status_code == 200
+    return cam
+
+
+def test_changing_model_restarts_running_cameras_and_keeps_counts(env):
+    c, _ = env
+    cam = _running_cam(c)
+    FakeWorker.instances[0].saved = 5
+    assert c.put("/api/settings", json={"MODEL": "b.pt", "CLASSES": []}).status_code == 200
+    assert _wait(lambda: len(FakeWorker.instances) == 2)
+    old, new = FakeWorker.instances
+    assert old.running is False and new.running is True and new.model_name == "b.pt"
+    assert c.get("/api/capture/status").get_json()[cam["id"]]["saved"] == 5  # carried over
+
+
+def test_threshold_change_restarts_but_identical_value_does_not(env):
+    c, _ = env
+    _running_cam(c)
+    c.put("/api/settings", json={"CONF_THRESH": 0.25})          # same as current
+    _time.sleep(0.3)
+    assert len(FakeWorker.instances) == 1
+    c.put("/api/settings", json={"CONF_THRESH": 0.6})
+    assert _wait(lambda: len(FakeWorker.instances) == 2)
+    assert FakeWorker.instances[1].cfg["CONF_THRESH"] == 0.6
+
+
+def test_settings_change_while_stopped_starts_nothing(env):
+    c, _ = env
+    _ready_cam(c)
+    c.put("/api/settings", json={"CONF_THRESH": 0.6})
+    _time.sleep(0.3)
+    assert FakeWorker.instances == []
+
+
+def test_out_of_range_threshold_rejected(env):
+    c, _ = env
+    assert c.put("/api/settings", json={"CONF_THRESH": 5}).status_code == 400
+    assert c.put("/api/settings", json={"CONF_THRESH": "abc"}).status_code == 400
+
+
+def test_recent_and_thumb_endpoints(env):
+    c, tmp = env
+    p = _make_capture(tmp)
+    rel = p.relative_to(tmp / "captures").as_posix()
+    r = c.get("/api/recent?limit=5").get_json()
+    assert len(r["items"]) == 1 and r["items"][0]["class"] == "car"
+    t = c.get(f"/api/thumb/{rel}?w=64")
+    assert t.status_code == 200 and t.mimetype == "image/jpeg"
+    assert c.get("/api/thumb/..%2Fconfig.ini").status_code in (400, 404)
+
+
+def test_status_reports_restarting_state_during_restart(env):
+    c, _ = env
+    cam = _running_cam(c)
+    FakeWorker.instances[0].stop = lambda: _time.sleep(0.4)   # slow shutdown keeps the restart in flight
+    c.put("/api/settings", json={"CONF_THRESH": 0.7})
+    assert _wait(lambda: c.get("/api/capture/status").get_json()[cam["id"]]["state"] == "restarting")

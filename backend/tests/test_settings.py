@@ -55,3 +55,24 @@ def test_save_preserves_comments_and_unrelated_lines(tmp_path):
 
 def test_dedup_seconds_default_is_short(tmp_path):
     assert settings.load(tmp_path / "none.ini")["DEDUP_SECONDS"] == 2
+
+
+@pytest.mark.parametrize("key,bad", [("CONF_THRESH", 0), ("CONF_THRESH", 1.5), ("MIN_ROI_OVERLAP", -0.1),
+                                     ("MIN_BOX", 0), ("DEDUP_SECONDS", -1), ("JPEG_QUALITY", 0),
+                                     ("IMG_SIZE", 100)])
+def test_out_of_range_values_rejected(tmp_path, key, bad):
+    with pytest.raises(ValueError):
+        settings.save(tmp_path / "c.ini", {key: bad})
+
+
+def test_valid_thresholds_round_trip(tmp_path):
+    p = tmp_path / "c.ini"
+    settings.save(p, {"CONF_THRESH": 0.55, "MIN_BOX": 60, "MIN_ROI_OVERLAP": 0.7, "DEDUP_SECONDS": 3})
+    cfg = settings.load(p)
+    assert (cfg["CONF_THRESH"], cfg["MIN_BOX"], cfg["MIN_ROI_OVERLAP"], cfg["DEDUP_SECONDS"]) == (0.55, 60, 0.7, 3)
+
+
+def test_out_of_range_value_in_file_falls_back_to_default(tmp_path):
+    p = tmp_path / "c.ini"
+    p.write_text("[Model]\nCONF_THRESH = 7\n", encoding="utf-8")
+    assert settings.load(p)["CONF_THRESH"] == 0.25

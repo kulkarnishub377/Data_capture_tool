@@ -135,3 +135,48 @@ def test_set_rois_validates_every_polygon_and_allows_clearing(tmp_path):
         s.set_rois(cam["id"], [tri, [[0, 0], [1, 1]]], [640, 480])
     assert len(s.set_rois(cam["id"], [tri, tri], [640, 480])["rois"]) == 2
     assert s.set_rois(cam["id"], [], [640, 480])["rois"] == []
+
+
+def _save_at(tmp_path, ts, cls="car", mode="both"):
+    return storage.save_capture(tmp_path, "Cam-01", cls, ts, _frame(), (200, 150, 300, 250),
+                                mode, 95, 0.15, 0.40, None)
+
+
+def test_list_items_carry_a_readable_timestamp(tmp_path):
+    _save(tmp_path, "frame")
+    assert storage.list_captures(tmp_path)["items"][0]["ts"] == "2026-11-02 10:30:15"
+
+
+def test_recent_captures_newest_first_one_item_per_vehicle_preferring_crop(tmp_path):
+    _save_at(tmp_path, datetime(2026, 11, 2, 9, 0, 0, 1000))
+    _save_at(tmp_path, datetime(2026, 11, 2, 9, 0, 5, 1000), cls="bus")
+    _save_at(tmp_path, datetime(2026, 11, 1, 23, 0, 0, 1000))
+    items = storage.recent_captures(tmp_path, limit=10)
+    assert [i["class"] for i in items] == ["bus", "car", "car"]
+    assert {i["kind"] for i in items} == {"crop"}
+    assert [i["ts"] for i in items][0] == "2026-11-02 09:00:05"
+
+
+def test_recent_captures_respects_limit_and_frame_only(tmp_path):
+    for s in range(5):
+        _save_at(tmp_path, datetime(2026, 11, 2, 9, 0, s, 1000), mode="frame")
+    items = storage.recent_captures(tmp_path, limit=3)
+    assert len(items) == 3 and {i["kind"] for i in items} == {"frame"}
+
+
+def test_thumbnail_is_small_and_cached(tmp_path):
+    import cv2
+    big = np.full((720, 1280, 3), 90, dtype="uint8")
+    p = storage.save_capture(tmp_path / "cap", "Cam-01", "car", TS, big, (10, 10, 50, 50), "frame",
+                             95, 0.1, 0.4, None)[0]
+    rel = p.relative_to(tmp_path / "cap").as_posix()
+    t1 = storage.make_thumbnail(tmp_path / "cap", rel, tmp_path / "thumbs", 320)
+    assert cv2.imread(str(t1)).shape[1] == 320
+    m1 = t1.stat().st_mtime_ns
+    assert storage.make_thumbnail(tmp_path / "cap", rel, tmp_path / "thumbs", 320) == t1
+    assert t1.stat().st_mtime_ns == m1  # served from cache, not re-encoded
+
+
+def test_thumbnail_rejects_path_escape(tmp_path):
+    with pytest.raises(ValueError):
+        storage.make_thumbnail(tmp_path, "../x.jpg", tmp_path / "t", 200)
