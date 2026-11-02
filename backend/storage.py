@@ -1,4 +1,5 @@
 """JSON camera store, capture file writing and gallery scanning. No database."""
+import hashlib
 import json
 import os
 import re
@@ -130,6 +131,11 @@ def _parse_name(cam_dir_name, stem):
     return rest, (m["d"], m["t"], m["ms"], int(m["n"] or 1))
 
 
+def _ts_text(key):
+    d, t = key[0], key[1]
+    return f"{d[:4]}-{d[4:6]}-{d[6:8]} {t[:2]}:{t[2:4]}:{t[4:6]}" if d and t else ""
+
+
 def list_captures(root, camera=None, date=None, cls=None, page=1, per_page=60):
     root = Path(root)
     items = []
@@ -147,7 +153,7 @@ def list_captures(root, camera=None, date=None, cls=None, page=1, per_page=60):
             if cls and c != cls:
                 continue
             items.append({"path": rel.as_posix(), "camera": cam_dir, "date": day,
-                          "kind": kind, "class": c, "name": p.name, "_key": key})
+                          "kind": kind, "class": c, "name": p.name, "ts": _ts_text(key), "_key": key})
     items.sort(key=lambda i: i["_key"], reverse=True)
     for i in items:
         del i["_key"]
@@ -187,3 +193,57 @@ def mask_url(url: str) -> str:
     if not at or ":" not in userinfo:
         return url
     return f"{scheme}{userinfo.split(':', 1)[0]}:****@{host}{rest}"
+
+
+def recent_captures(root, limit=24):
+    """Newest captures across all cameras, one item per vehicle (the crop if both crop and frame exist).
+
+    Only the newest date folders are read, so this stays fast with tens of thousands of files.
+    """
+    root = Path(root)
+    if not root.is_dir():
+        return []
+    items = []
+    for cam in root.iterdir():
+        if not cam.is_dir():
+            continue
+        got = 0
+        for day in sorted((d for d in cam.iterdir() if d.is_dir()), reverse=True):
+            by_stem = {}
+            for kind in ("frame", "crop"):          # crop is written last so it wins
+                kd = day / kind
+                if kd.is_dir():
+                    for p in kd.glob("*.jpg"):
+                        by_stem[p.stem] = (p, kind)
+            for stem, (p, kind) in by_stem.items():
+                c, key = _parse_name(cam.name, stem)
+                items.append({"path": p.relative_to(root).as_posix(), "camera": cam.name, "date": day.name,
+                              "kind": kind, "class": c, "name": p.name, "ts": _ts_text(key), "_key": key})
+            got += len(by_stem)
+            if got >= limit:
+                break
+    items.sort(key=lambda i: i["_key"], reverse=True)
+    items = items[:limit]
+    for i in items:
+        del i["_key"]
+    return items
+
+
+def make_thumbnail(root, rel, cache_dir, width) -> Path:
+    """Small JPEG of a capture, cached on disk (full frames are too heavy to show as thumbnails)."""
+    src = safe_capture_path(root, rel)
+    if src.suffix.lower() != ".jpg" or not src.is_file():
+        raise FileNotFoundError(rel)
+    width = max(32, min(1280, int(width)))
+    dst = Path(cache_dir) / f"{hashlib.sha1(rel.encode()).hexdigest()[:20]}_{width}.jpg"
+    if dst.exists() and dst.stat().st_mtime_ns >= src.stat().st_mtime_ns:
+        return dst
+    img = cv2.imread(str(src))
+    if img is None:
+        raise FileNotFoundError(rel)
+    h, w = img.shape[:2]
+    if w > width:
+        img = cv2.resize(img, (width, max(1, int(h * width / w))), interpolation=cv2.INTER_AREA)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(dst), img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    return dst

@@ -38,6 +38,12 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
     store = storage.CameraStore(data_dir / "cameras.json")
     workers, wlock = {}, threading.Lock()
     names_cache = {}
+    carry = {}         # cid -> counters of workers replaced by a restart (so the UI counts keep growing)
+    restarting = set()  # cids whose worker is being replaced right now
+    failed = {}        # cid -> why an automatic restart could not bring the camera back
+    WORKER_KEYS = {"MODEL", "DEVICE", "HALF", "CONF_THRESH", "IMG_SIZE", "CLASSES", "SAVE_MODE",
+                   "SAVE_METADATA", "WHEN", "MIN_BOX", "MIN_ROI_OVERLAP", "JPEG_QUALITY",
+                   "PAD_NORMAL", "PAD_BIKE", "DEDUP_SECONDS"}
 
     def err(msg, code=400):
         return jsonify({"error": msg}), code
@@ -114,6 +120,8 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
             w = workers.pop(cid, None)
         if w:
             w.stop()
+        carry.pop(cid, None)
+        failed.pop(cid, None)
         store.delete(cid)
         return jsonify({"ok": True})
 
@@ -182,11 +190,15 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
             m = str(d["MODEL"])
             if Path(m).name != m or not (Path(cfg()["MODELS_DIR"]) / m).is_file():
                 return err(f"Model file not found: {m}")
+        before = settings.load(config_path)
         try:
             settings.save(config_path, d)
         except (ValueError, TypeError) as e:
             return err(str(e))
-        return jsonify(settings.load(config_path))
+        after = settings.load(config_path)
+        if any(k in WORKER_KEYS and before.get(k) != after.get(k) for k in d):
+            restart_running()
+        return jsonify(after)
 
     @app.get("/api/model/classes")
     def model_classes():
@@ -202,37 +214,70 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
         return jsonify({"names": list(names.values()), "selected": selected, "warnings": warns})
 
     # ---- capture control --------------------------------------------------
-    @app.post("/api/capture/<cid>/start")
-    def capture_start(cid):
+    def start_worker(cid):
+        """Build + start the worker for a camera. Returns (payload dict, http status)."""
         cam = store.get(cid)
         if not cam:
-            return err("camera not found", 404)
+            return {"error": "camera not found"}, 404
         if not cam.get("rois"):
-            return err("Draw an ROI (at least 3 points) before starting capture")
+            return {"error": "Draw an ROI (at least 3 points) before starting capture"}, 400
         c = cfg()
-        mp = Path(c["MODELS_DIR"]) / c["MODEL"]
-        if not mp.is_file():
-            return err(f"Model file not found: {c['MODEL']}")
+        if not (Path(c["MODELS_DIR"]) / c["MODEL"]).is_file():
+            return {"error": f"Model file not found: {c['MODEL']}"}, 400
         try:
             names = model_names(c, c["MODEL"])
         except Exception as e:  # noqa: BLE001
-            return err(f"Could not load model: {e}")
+            return {"error": f"Could not load model: {e}"}, 400
         with wlock:
             old = workers.get(cid)
             if old and old.status()["state"] not in ("stopped", "error"):
-                return jsonify({"ok": True, "already_running": True})
+                return {"ok": True, "already_running": True}, 200
             if old:
-                old.stop()  # error/stopped worker: release its threads before replacing it
+                old.stop()  # release the old worker's threads, keep its counts
+                s = old.status()
+                b = carry.setdefault(cid, {"saved": 0, "skipped": 0})
+                b["saved"] += s["saved"]
+                b["skipped"] += s["skipped"]
             pool, warns = devices.resolve(c["DEVICE"], [g["id"] for g in device_detector()])
             cams = store.list()
             assign = devices.assign([x["id"] for x in cams], pool,
                                     {x["id"]: x.get("device") for x in cams if x.get("device")})
             classes, class_warns = class_selection(c, names)
-            warns = warns + class_warns
             w = worker_factory(cam, c, assign[cid], classes=classes, model_name=c["MODEL"])
             workers[cid] = w
+            failed.pop(cid, None)
             w.start()
-        return jsonify({"ok": True, "device": assign[cid], "warnings": warns})
+        return {"ok": True, "device": assign[cid], "warnings": warns + class_warns}, 200
+
+    def restart_one(cid):
+        """Apply new settings to a running camera. Saved images and counters are kept."""
+        try:
+            with wlock:
+                old = workers.get(cid)
+            if old:
+                old.stop()
+            payload, code = start_worker(cid)
+            if code != 200:
+                failed[cid] = payload.get("error", "restart failed")
+            elif payload.get("already_running"):
+                failed[cid] = "The previous capture is still shutting down - press Start again"
+        except Exception as e:  # noqa: BLE001
+            log.exception("restart failed")
+            failed[cid] = str(e)
+        finally:
+            restarting.discard(cid)
+
+    def restart_running():
+        with wlock:
+            ids = [cid for cid, w in workers.items() if w.status()["state"] not in ("stopped", "error")]
+            restarting.update(ids)
+        for cid in ids:
+            threading.Thread(target=restart_one, args=(cid,), daemon=True).start()
+
+    @app.post("/api/capture/<cid>/start")
+    def capture_start(cid):
+        payload, code = start_worker(cid)
+        return jsonify(payload), code
 
     @app.post("/api/capture/<cid>/stop")
     def capture_stop(cid):
@@ -245,23 +290,39 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
     @app.get("/api/capture/status")
     def capture_status():
         with wlock:
-            return jsonify({k: w.status() for k, w in workers.items()})
+            snapshot = dict(workers)
+        out = {}
+        for cid, w in snapshot.items():
+            st = w.status()
+            b = carry.get(cid)
+            if b:
+                st["saved"] += b["saved"]
+                st["skipped"] += b["skipped"]
+            if cid in restarting:
+                st["state"], st["message"] = "restarting", "applying new settings"
+            elif cid in failed and st["state"] in ("stopped", "error"):
+                st["state"], st["message"] = "error", failed[cid]
+            out[cid] = st
+        return jsonify(out)
 
     @app.get("/api/stream/<cid>")
     def stream(cid):
         with wlock:
-            w = workers.get(cid)
-        if w is None:
-            return err("not running", 404)
+            if workers.get(cid) is None:
+                return err("not running", 404)
 
         def gen():
             last = None
             while True:
+                with wlock:
+                    w = workers.get(cid)   # re-read each loop: the stream survives a restart
+                if w is None:
+                    return
                 jpg = w.latest_jpeg()
                 if jpg is not None and jpg is not last:
                     last = jpg
-                    yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n"
-                elif w.status()["state"] == "stopped":
+                    yield b"--frame%sContent-Type: image/jpeg%s%s" % (b"\r\n", b"\r\n\r\n", jpg) + b"\r\n"
+                elif w.status()["state"] == "stopped" and cid not in restarting:
                     return
                 time.sleep(0.08)
 
@@ -296,19 +357,41 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
             return err("not found", 404)
         return jsonify({"ok": True})
 
+    @app.get("/api/recent")
+    def recent():
+        try:
+            limit = min(100, max(1, int(request.args.get("limit", 24))))
+        except ValueError:
+            return err("limit must be a number")
+        return jsonify({"items": storage.recent_captures(cfg()["OUTPUT_DIR"], limit)})
+
+    @app.get("/api/thumb/<path:rel>")
+    def thumb(rel):
+        try:
+            p = storage.make_thumbnail(cfg()["OUTPUT_DIR"], rel, data_dir / "thumbs",
+                                       int(request.args.get("w", 320)))
+        except ValueError as e:
+            return err(str(e))
+        except FileNotFoundError:
+            abort(404)
+        r = send_file(p, mimetype="image/jpeg")
+        r.headers["Cache-Control"] = "public, max-age=3600"
+        return r
+
     app.workers = workers
     return app
 
 
 def main():
-    cfg = settings.load(ROOT / "config.ini")
+    config_path = os.environ.get("DCT_CONFIG") or ROOT / "config.ini"
+    cfg = settings.load(config_path)
     debug = cfg["DEBUG"]
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO,
                         format="[%(asctime)s] %(levelname)s %(name)s: %(message)s", datefmt="%H:%M:%S")
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
     logging.getLogger("PIL").setLevel(logging.WARNING)
     port = int(os.environ.get("PORT", 5100))
-    app = create_app()
+    app = create_app(config_path, os.environ.get("DCT_DATA"))
     # importing torch takes seconds: do it now so the first page load is quick
     threading.Thread(target=devices.detect, daemon=True).start()
     if os.environ.get("NO_BROWSER") != "1":

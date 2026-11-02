@@ -25,11 +25,20 @@ DEFAULTS = {
     "DEDUP_SECONDS": ("Capture", 2),
 }
 CHOICES = {"SAVE_MODE": {"frame", "crop", "both"}, "WHEN": {"first", "best"}}
+RANGES = {  # key -> (min, max), inclusive
+    "CONF_THRESH": (0.01, 1.0), "MIN_ROI_OVERLAP": (0.0, 1.0), "MIN_BOX": (1, 5000),
+    "DEDUP_SECONDS": (0, 120), "JPEG_QUALITY": (1, 100), "IMG_SIZE": (160, 2048),
+    "PAD_NORMAL": (0.0, 2.0), "PAD_BIKE": (0.0, 2.0),
+}
 
 
 def _validate(key, value):
     if key in CHOICES and value not in CHOICES[key]:
         raise ValueError(f"{key} must be one of {sorted(CHOICES[key])}, got {value!r}")
+    if key in RANGES:
+        lo, hi = RANGES[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not lo <= value <= hi:
+            raise ValueError(f"{key} must be a number between {lo} and {hi}, got {value!r}")
 
 
 def _to_text(value):

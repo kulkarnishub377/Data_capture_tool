@@ -13,6 +13,7 @@ class FakeWorker:
 
     def __init__(self, camera, cfg, device, classes=None, model_name="", **kw):
         self.camera, self.device, self.classes, self.model_name = camera, device, classes, model_name
+        self.cfg = cfg
         self.running = False
         FakeWorker.instances.append(self)
 
