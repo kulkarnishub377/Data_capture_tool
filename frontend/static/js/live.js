@@ -1,79 +1,37 @@
-/* Live tab: settings bar + camera grid with live MJPEG view and Start/Stop. */
+/* Live tab: settings summary, camera grid with live view, recent captures panel.
+   (All settings controls are in the Settings tab - see settings.js.) */
 (() => {
-  const cards = {};       // camera id -> {el, img, chip, count, btn, running}
+  const cards = {};              // camera id -> card state
   let pollTimer = null;
 
-  const SETTING_CONTROLS = { "#sel-mode": "SAVE_MODE", "#sel-meta": "SAVE_METADATA", "#sel-when": "WHEN" };
+  // ---------------------------------------------------------------- settings summary
+  const SAVE_TEXT = { frame: "Full frame", crop: "Crop", both: "Frame + crop" };
 
-  async function saveSetting(patch) {
-    try { await api("/settings", { method: "PUT", body: patch }); toast("Saved - applies on next Start"); }
-    catch (e) { /* toast shown by api() */ }
+  async function loadSummary() {
+    const s = await api("/settings");
+    const items = [
+      ["Model", s.MODEL], ["Device", s.DEVICE], ["Confidence", s.CONF_THRESH],
+      ["Classes", s.CLASSES.length ? `${s.CLASSES.length} selected` : "default"],
+      ["Save", SAVE_TEXT[s.SAVE_MODE] || s.SAVE_MODE], ["When", s.WHEN === "first" ? "First in ROI" : "Best frame"],
+      ["Metadata", s.SAVE_METADATA ? "Keep" : "Off"],
+    ];
+    $("#sum-items").replaceChildren(...items.map(([k, v]) => h("span", { class: "sum" }, h("b", {}, k), " ", String(v))));
   }
+  $("#sum-open").addEventListener("click", () => showTab("settings"));
 
-  async function loadClasses(model) {
-    const r = await api("/model/classes?model=" + encodeURIComponent(model));
-    const bar = $("#class-bar");
-    bar.replaceChildren(h("span", { class: "hint" }, "Classes:"));
-    const chosen = new Set(r.selected);
-    r.names.forEach(n => {
-      const cb = h("input", { type: "checkbox", value: n });
-      cb.checked = chosen.has(n);
-      cb.addEventListener("change", () => {
-        const sel = [...bar.querySelectorAll("input:checked")].map(i => i.value);
-        if (!sel.length) { cb.checked = true; toast("Select at least one class", true); return; }
-        saveSetting({ CLASSES: sel });
-      });
-      bar.append(h("label", {}, cb, " ", n));
-    });
-  }
-
-  async function loadControls() {
-    const [models, s, dev] = await Promise.all([api("/models"), api("/settings"), api("/devices")]);
-    const sm = $("#sel-model");
-    sm.replaceChildren(...models.map(m => h("option", { value: m }, m)));
-    if (!models.includes(s.MODEL)) sm.prepend(h("option", { value: s.MODEL }, s.MODEL + " (missing)"));
-    sm.value = s.MODEL;
-
-    const opts = ["auto", "cpu", ...dev.gpus.map(g => g.id)];
-    if (dev.gpus.length > 1) opts.push(dev.gpus.map(g => g.id).join(","));
-    if (!opts.includes(s.DEVICE)) opts.push(s.DEVICE);
-    const label = v => {
-      const g = dev.gpus.find(x => x.id === v);
-      return g ? `${v} - ${g.name}` : v;
-    };
-    $("#sel-device").replaceChildren(...opts.map(o => h("option", { value: o }, label(o))));
-    $("#sel-device").value = s.DEVICE;
-    if (dev.warnings.length) toast(dev.warnings.join("; "), true);
-
-    $("#sel-mode").value = s.SAVE_MODE;
-    $("#sel-meta").value = String(s.SAVE_METADATA);
-    $("#sel-when").value = s.WHEN;
-    if (models.includes(s.MODEL)) await loadClasses(s.MODEL);
-  }
-
-  $("#sel-model").addEventListener("change", async e => {
-    try {
-      await api("/settings", { method: "PUT", body: { MODEL: e.target.value, CLASSES: [] } });
-      await loadClasses(e.target.value);
-      toast("Model saved - applies on next Start");
-    } catch (err) { loadControls(); }
-  });
-  $("#sel-device").addEventListener("change", e => saveSetting({ DEVICE: e.target.value }));
-  for (const [sel, key] of Object.entries(SETTING_CONTROLS)) {
-    $(sel).addEventListener("change", e => {
-      const v = e.target.value;
-      saveSetting({ [key]: key === "SAVE_METADATA" ? v === "true" : v });
-    });
-  }
-
+  // ---------------------------------------------------------------- camera cards
   function makeCard(cam) {
     const img = h("img", { alt: cam.name });
     const view = h("div", { class: "view" }, "Stopped");
     const chip = h("span", { class: "chip" }, "stopped");
     const count = h("span", { class: "count" }, "");
-    const btn = h("button", { class: "primary" }, "Start");
+    const btn = h("button", { class: "primary" }, h("i", { class: "fa-solid fa-play" }), " Start");
     const c = { cam, img, view, chip, count, btn, running: false };
     btn.addEventListener("click", () => toggle(c));
+    // if the live stream connection drops while the camera should be running, reconnect it
+    img.addEventListener("error", () => {
+      if (c.running) setTimeout(() => { if (c.running) img.src = `/api/stream/${cam.id}?t=${Date.now()}`; }, 1500);
+    });
     c.el = h("div", { class: "cam" }, view,
       h("div", { class: "meta" }, h("span", { class: "name" }, cam.name), chip, count, btn));
     return c;
@@ -95,18 +53,21 @@
   }
 
   function render(c, st) {
-    const running = !!st && st.state !== "stopped";
-    c.chip.textContent = st ? st.state + (st.message && st.state !== "connected" ? ` - ${st.message}` : "") : "stopped";
-    c.chip.className = "chip " + (st ? st.state : "");
+    const state = st ? st.state : "stopped";
+    const running = state !== "stopped" && state !== "error";
+    c.chip.textContent = state + (st && st.message && state !== "connected" ? ` - ${st.message}` : "");
+    c.chip.className = "chip " + state;
     c.count.textContent = st ? `saved ${st.saved} | skipped ${st.skipped} | ${st.device}` : "";
-    c.btn.textContent = running ? "Stop" : "Start";
+    c.btn.replaceChildren(h("i", { class: running ? "fa-solid fa-stop" : "fa-solid fa-play" }), running ? " Stop" : " Start");
     c.btn.className = running ? "danger" : "primary";
     if (running && !c.running) {
+      c.running = true;
       c.img.src = `/api/stream/${c.cam.id}?t=${Date.now()}`;
       c.view.replaceChildren(c.img);
     } else if (!running && c.running) {
+      c.running = false;
       c.img.removeAttribute("src");
-      c.view.replaceChildren("Stopped");
+      c.view.replaceChildren(state === "error" ? "Stopped (see status)" : "Stopped");
     }
     c.running = running;
   }
@@ -116,6 +77,7 @@
       const st = await api("/capture/status");
       for (const id in cards) render(cards[id], st[id]);
     } catch (e) { /* offline: keep last state */ }
+    pollRecent();
   }
 
   async function buildGrid() {
@@ -131,9 +93,42 @@
     await poll();
   }
 
+  // ---------------------------------------------------------------- recent captures
+  const recentEls = new Map();    // path -> element
+  let recentFirst = true;
+
+  async function pollRecent() {
+    let r;
+    try { r = await api("/recent?limit=20"); } catch (e) { return; }
+    const list = $("#recent-list");
+    const keep = new Set(r.items.map(i => i.path));
+    for (const [path, el] of recentEls) if (!keep.has(path)) { el.remove(); recentEls.delete(path); }
+    const ordered = r.items.map(it => {
+      let el = recentEls.get(it.path);
+      if (!el) {
+        const img = h("img", { src: `/api/thumb/${it.path}?w=360`, loading: "lazy", alt: `${it.class} - ${it.camera}` });
+        el = h("div", { class: "rc" + (recentFirst ? "" : " new"), title: it.name, tabindex: "0", role: "button" },
+          img, h("span", { class: "tag" }, it.class),
+          h("div", { class: "cap" }, h("span", {}, it.camera), h("span", { class: "ago" }, "")));
+        const open = () => openLightbox(it, pollRecent);
+        el.addEventListener("click", open);
+        el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+        recentEls.set(it.path, el);
+      }
+      el.querySelector(".ago").textContent = timeAgo(it.ts);
+      return el;
+    });
+    list.replaceChildren(...ordered);
+    recentFirst = false;
+    $("#recent-empty").hidden = ordered.length > 0;
+    $("#recent-count").textContent = ordered.length ? `latest ${ordered.length}` : "";
+  }
+
   tabs.live.onShow = async () => {
-    try { await loadControls(); await buildGrid(); } catch (e) { /* toast shown */ }
+    try { await loadSummary(); await buildGrid(); } catch (e) { /* toast shown */ }
     clearInterval(pollTimer);
-    pollTimer = setInterval(() => { if (document.getElementById("tab-live").classList.contains("active")) poll(); }, 2000);
+    pollTimer = setInterval(() => {
+      if (!document.hidden && $("#tab-live").classList.contains("active")) poll();
+    }, 2000);
   };
 })();

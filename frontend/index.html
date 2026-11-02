@@ -4,45 +4,51 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Data Capture</title>
+<link rel="icon" type="image/svg+xml" href="/static/img/logo.svg">
+<link rel="stylesheet" href="/static/vendor/fontawesome/css/all.min.css">
 <link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body>
 <header class="top">
-  <div class="brand">Data Capture</div>
+  <a class="brand" href="/" title="Data Capture">
+    <img src="/static/img/logo.svg" alt="" width="30" height="30">
+    <span>Data Capture</span>
+  </a>
   <nav id="tabs">
-    <button data-tab="live" class="active">Live</button>
-    <button data-tab="roi">ROI</button>
-    <button data-tab="cameras">Cameras</button>
-    <button data-tab="gallery">Gallery</button>
+    <button data-tab="live" class="active"><i class="fa-solid fa-video"></i> Live</button>
+    <button data-tab="roi"><i class="fa-solid fa-draw-polygon"></i> ROI</button>
+    <button data-tab="cameras"><i class="fa-solid fa-camera"></i> Cameras</button>
+    <button data-tab="gallery"><i class="fa-solid fa-images"></i> Gallery</button>
+    <button data-tab="settings" id="tab-btn-settings"><i class="fa-solid fa-gear"></i> Settings</button>
   </nav>
   <div id="toast" role="status" aria-live="polite"></div>
 </header>
 
 <main>
+  <!-- ================= LIVE ================= -->
   <section id="tab-live" class="tab active">
-    <div class="bar" id="live-bar">
-      <label>Model <select id="sel-model"></select></label>
-      <label>Device <select id="sel-device"></select></label>
-      <label>Save <select id="sel-mode">
-        <option value="frame">Full frame</option>
-        <option value="crop">Crop</option>
-        <option value="both">Both</option>
-      </select></label>
-      <label>Metadata <select id="sel-meta">
-        <option value="false">Don't keep</option>
-        <option value="true">Keep (.json)</option>
-      </select></label>
-      <label>When <select id="sel-when">
-        <option value="first">First in ROI</option>
-        <option value="best">Best frame</option>
-      </select></label>
-      <span class="hint">Changes apply on next Start</span>
+    <div class="panel summary" id="live-summary">
+      <div class="sum-items" id="sum-items"></div>
+      <button id="sum-open"><i class="fa-solid fa-gear"></i> Settings</button>
     </div>
-    <div class="bar" id="class-bar"></div>
-    <div id="live-grid" class="grid"></div>
-    <p id="live-empty" class="empty" hidden>No cameras yet. Add one in the Cameras tab.</p>
+
+    <div class="live-layout">
+      <div>
+        <div id="live-grid" class="grid"></div>
+        <p id="live-empty" class="empty" hidden>No cameras yet. Add one in the Cameras tab.</p>
+      </div>
+      <aside id="recent" class="panel" aria-label="Recent captures">
+        <div class="recent-head">
+          <strong><i class="fa-solid fa-clock-rotate-left"></i> Recent captures</strong>
+          <span class="hint" id="recent-count"></span>
+        </div>
+        <div id="recent-list"></div>
+        <p id="recent-empty" class="empty small">Nothing captured yet. Start a camera: each vehicle that enters an ROI appears here.</p>
+      </aside>
+    </div>
   </section>
 
+  <!-- ================= ROI ================= -->
   <section id="tab-roi" class="tab">
     <div class="bar">
       <label>Camera <select id="roi-cam"></select></label>
@@ -58,6 +64,7 @@
     <div class="canvas-wrap"><canvas id="roi-canvas" width="960" height="540"></canvas></div>
   </section>
 
+  <!-- ================= CAMERAS ================= -->
   <section id="tab-cameras" class="tab">
     <form id="cam-form" class="bar">
       <input id="cam-name" placeholder="Name (e.g. Cam-01)" required>
@@ -68,6 +75,7 @@
     <div id="cam-list" class="list"></div>
   </section>
 
+  <!-- ================= GALLERY ================= -->
   <section id="tab-gallery" class="tab">
     <div class="bar">
       <label>Camera <select id="g-cam"><option value="">All</option></select></label>
@@ -78,6 +86,167 @@
     </div>
     <div id="g-grid" class="thumbs"></div>
     <div class="bar pager"><button id="g-prev">Prev</button><span id="g-page"></span><button id="g-next">Next</button></div>
+  </section>
+  <!-- ================= SETTINGS ================= -->
+  <section id="tab-settings" class="tab">
+    <div class="savebar">
+      <div class="savebar-title">
+        <span class="ico"><i class="fa-solid fa-gear"></i></span>
+        <div><h2>Settings</h2><span class="sub">Model, detection and capture behaviour</span></div>
+      </div>
+      <span id="set-status" class="pill ok"><i class="fa-solid fa-circle-check"></i><span id="set-status-text">All changes saved</span></span>
+      <span class="spacer"></span>
+      <button id="set-discard" class="btn" disabled><i class="fa-solid fa-rotate-left"></i> Discard</button>
+      <button id="set-save" class="btn primary" disabled><i class="fa-solid fa-floppy-disk"></i> <span id="set-save-label">Save &amp; restart</span></button>
+    </div>
+
+    <div class="callout">
+      <i class="fa-solid fa-circle-info"></i>
+      <div>Nothing changes until you press <b>Save &amp; restart</b>. Running cameras restart <b>once</b> with the new settings;
+        saved images and counters are kept.</div>
+    </div>
+
+    <div class="set-layout">
+      <nav class="set-nav" id="set-nav" aria-label="Settings sections">
+        <button type="button" data-sec="model" class="active"><i class="fa-solid fa-microchip"></i><span>Model &amp; device</span><em class="dot" title="Unsaved changes"></em></button>
+        <button type="button" data-sec="detect"><i class="fa-solid fa-bullseye"></i><span>Detection</span><em class="dot" title="Unsaved changes"></em></button>
+        <button type="button" data-sec="capture"><i class="fa-solid fa-camera-retro"></i><span>Capture</span><em class="dot" title="Unsaved changes"></em></button>
+        <button type="button" data-sec="adv"><i class="fa-solid fa-sliders"></i><span>Advanced</span><em class="dot" title="Unsaved changes"></em></button>
+      </nav>
+
+      <div class="set-body">
+
+        <!-- ---- Model & device ---- -->
+        <section class="set-sec active" id="sec-model">
+          <header class="sec-head"><span class="ico"><i class="fa-solid fa-microchip"></i></span>
+            <div><h3>Model &amp; device</h3><p>Which detector runs, and on what hardware.</p></div></header>
+
+          <div class="srow" data-keys="MODEL">
+            <div class="slabel"><label for="sel-model">Detection model</label>
+              <small>Weights from the models folder: your trained model or a stock COCO model. Switching model resets the classes to that model's defaults.</small></div>
+            <div class="sctl">
+              <select id="sel-model"></select>
+              <span id="model-info" class="badge" hidden></span>
+            </div>
+          </div>
+
+          <div class="srow" data-keys="DEVICE">
+            <div class="slabel"><label for="sel-device">Compute device</label>
+              <small id="dev-info">auto uses every GPU found, otherwise the CPU.</small></div>
+            <div class="sctl"><select id="sel-device"></select></div>
+          </div>
+        </section>
+
+        <!-- ---- Detection ---- -->
+        <section class="set-sec" id="sec-detect" hidden>
+          <header class="sec-head"><span class="ico"><i class="fa-solid fa-bullseye"></i></span>
+            <div><h3>Detection</h3><p>What counts as a vehicle worth capturing.</p></div></header>
+
+          <div class="srow" data-keys="CONF_THRESH">
+            <div class="slabel"><label for="conf-range">Confidence threshold</label>
+              <small>Detections scoring below this are ignored.</small></div>
+            <div class="sctl col">
+              <div class="conf">
+                <input type="range" id="conf-range" min="0.05" max="0.95" step="0.01">
+                <input type="number" id="conf-num" min="0.01" max="1" step="0.01" aria-label="Confidence value">
+              </div>
+              <div class="scale"><span><i class="fa-solid fa-arrow-left"></i> catches more</span><span>fewer false captures <i class="fa-solid fa-arrow-right"></i></span></div>
+            </div>
+          </div>
+
+          <div class="srow" data-keys="CLASSES">
+            <div class="slabel"><label>Classes to capture</label>
+              <small>Only these classes are saved. "Vehicles" selects the model's default set (COCO: car, motorcycle, bus, truck).</small></div>
+            <div class="sctl col">
+              <div class="classes">
+                <div id="class-chips" class="chips"></div>
+                <div class="picker">
+                  <button id="class-btn" class="btn" type="button" aria-haspopup="true" aria-expanded="false"><i class="fa-solid fa-tags"></i> <span id="class-btn-text">Choose classes</span></button>
+                  <div id="class-pop" hidden>
+                    <div class="search"><i class="fa-solid fa-magnifying-glass"></i><input id="class-search" type="search" placeholder="Search classes" aria-label="Search classes"></div>
+                    <div class="presets">
+                      <button type="button" class="btn sm" data-preset="default"><i class="fa-solid fa-car-side"></i> Vehicles</button>
+                      <button type="button" class="btn sm" data-preset="all"><i class="fa-solid fa-list-check"></i> Select all</button>
+                    </div>
+                    <div id="class-list"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---- Capture ---- -->
+        <section class="set-sec" id="sec-capture" hidden>
+          <header class="sec-head"><span class="ico"><i class="fa-solid fa-camera-retro"></i></span>
+            <div><h3>Capture</h3><p>What is saved for each vehicle, and when.</p></div></header>
+
+          <div class="srow" data-keys="SAVE_MODE">
+            <div class="slabel"><label id="lbl-mode">Image to save</label>
+              <small>One image is saved per vehicle. Full frame is best for training a detector.</small></div>
+            <div class="sctl">
+              <div class="seg" id="seg-mode" data-key="SAVE_MODE" role="radiogroup" aria-labelledby="lbl-mode">
+                <button type="button" role="radio" data-value="frame"><i class="fa-regular fa-image"></i> Full frame</button>
+                <button type="button" role="radio" data-value="crop"><i class="fa-solid fa-crop-simple"></i> Crop</button>
+                <button type="button" role="radio" data-value="both"><i class="fa-solid fa-images"></i> Both</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="srow" data-keys="WHEN">
+            <div class="slabel"><label id="lbl-when">Capture moment</label>
+              <small>First in ROI saves the first good frame. Best frame waits and saves the largest, most confident one before the vehicle leaves.</small></div>
+            <div class="sctl">
+              <div class="seg" id="seg-when" data-key="WHEN" role="radiogroup" aria-labelledby="lbl-when">
+                <button type="button" role="radio" data-value="first"><i class="fa-solid fa-bolt"></i> First in ROI</button>
+                <button type="button" role="radio" data-value="best"><i class="fa-solid fa-star"></i> Best frame</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="srow" data-keys="SAVE_METADATA">
+            <div class="slabel"><label for="sel-meta">Keep metadata</label>
+              <small>Off keeps a clean image-only training set. On writes a .json next to each image (class, confidence, box, time, model).</small></div>
+            <div class="sctl">
+              <label class="switch"><input type="checkbox" id="sel-meta" role="switch"><span class="track"></span><span class="switch-text" id="meta-text">Off</span></label>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---- Advanced ---- -->
+        <section class="set-sec" id="sec-adv" hidden>
+          <header class="sec-head"><span class="ico"><i class="fa-solid fa-sliders"></i></span>
+            <div><h3>Advanced thresholds</h3><p>Fine-tune what is accepted. The defaults suit most cameras.</p></div></header>
+
+          <div class="srow" data-keys="MIN_BOX">
+            <div class="slabel"><label for="adv-minbox">Minimum vehicle size</label>
+              <small>Ignore vehicles whose shorter side is smaller than this.</small></div>
+            <div class="sctl"><div class="unit"><input type="number" id="adv-minbox" min="1" max="5000" step="1"><span>px</span></div></div>
+          </div>
+          <div class="srow" data-keys="MIN_ROI_OVERLAP">
+            <div class="slabel"><label for="adv-overlap">Minimum overlap with ROI</label>
+              <small>Share of the vehicle that must be inside the ROI (0 to 1). Stops half-in vehicles being saved.</small></div>
+            <div class="sctl"><div class="unit"><input type="number" id="adv-overlap" min="0" max="1" step="0.05"><span>0 - 1</span></div></div>
+          </div>
+          <div class="srow" data-keys="DEDUP_SECONDS">
+            <div class="slabel"><label for="adv-dedup">Duplicate window</label>
+              <small>The same vehicle is not saved again if it reappears within this time after it was last seen (tracker ID switches). Keep it small so the next car in the lane is still captured.</small></div>
+            <div class="sctl"><div class="unit"><input type="number" id="adv-dedup" min="0" max="120" step="0.5"><span>sec</span></div></div>
+          </div>
+          <div class="srow" data-keys="JPEG_QUALITY">
+            <div class="slabel"><label for="adv-jpeg">JPEG quality</label>
+              <small>Higher is sharper and larger on disk.</small></div>
+            <div class="sctl"><div class="unit"><input type="number" id="adv-jpeg" min="1" max="100" step="1"><span>1 - 100</span></div></div>
+          </div>
+          <div class="srow" data-keys="IMG_SIZE">
+            <div class="slabel"><label for="adv-imgsz">Detection size</label>
+              <small>Model input size. Larger finds small or distant vehicles but is slower.</small></div>
+            <div class="sctl"><div class="unit"><input type="number" id="adv-imgsz" min="160" max="2048" step="32"><span>px</span></div></div>
+          </div>
+        </section>
+
+      </div>
+    </div>
   </section>
 </main>
 
@@ -91,5 +260,6 @@
 <script src="/static/js/roi.js"></script>
 <script src="/static/js/cameras.js"></script>
 <script src="/static/js/gallery.js"></script>
+<script src="/static/js/settings.js"></script>
 </body>
 </html>

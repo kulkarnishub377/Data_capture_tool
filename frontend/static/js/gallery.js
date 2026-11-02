@@ -1,6 +1,6 @@
 /* Gallery tab: browse captured images (filters, paging, enlarge, delete). */
 (() => {
-  let page = 1, total = 0, perPage = 60, current = null, filtersReady = false;
+  let page = 1, total = 0, perPage = 60, filtersReady = false;
 
   async function fillFilters() {
     const cams = await loadCameras();
@@ -27,9 +27,9 @@
     grid.replaceChildren();
     if (!r.items.length) grid.append(h("p", { class: "empty" }, "No captures match."));
     r.items.forEach(it => {
-      const img = h("img", { src: "/api/captures/" + it.path, loading: "lazy", alt: it.name });
+      const img = h("img", { src: "/api/thumb/" + it.path + "?w=320", loading: "lazy", alt: it.name });
       const fig = h("figure", { title: it.name }, img, h("figcaption", {}, `${it.camera} | ${it.class} | ${it.kind}`));
-      fig.addEventListener("click", () => open(it));
+      fig.addEventListener("click", () => openLightbox(it, load));
       grid.append(fig);
     });
     const pages = Math.max(1, Math.ceil(total / perPage));
@@ -38,21 +38,6 @@
     $("#g-prev").disabled = page <= 1;
     $("#g-next").disabled = page >= pages;
   }
-
-  function open(it) {
-    current = it;
-    $("#lb-img").src = "/api/captures/" + it.path;
-    $("#lb-name").textContent = it.name;
-    $("#lightbox").hidden = false;
-  }
-  const close = () => { $("#lightbox").hidden = true; current = null; };
-  $("#lb-close").addEventListener("click", close);
-  $("#lightbox").addEventListener("click", e => { if (e.target.id === "lightbox") close(); });
-  document.addEventListener("keydown", e => { if (e.key === "Escape") close(); });
-  $("#lb-del").addEventListener("click", async () => {
-    if (!current || !confirm("Delete this image?")) return;
-    try { await api("/captures/" + current.path, { method: "DELETE" }); close(); load(); } catch (e) { /* toast */ }
-  });
 
   ["#g-cam", "#g-date", "#g-cls"].forEach(s => $(s).addEventListener("change", () => { page = 1; load(); }));
   $("#g-refresh").addEventListener("click", () => load());

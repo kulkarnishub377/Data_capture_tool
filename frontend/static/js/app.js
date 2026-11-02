@@ -40,14 +40,54 @@ async function api(path, opts = {}) {
   return opts.raw ? res : data;
 }
 
-const tabs = { live: {}, roi: {}, cameras: {}, gallery: {} };
+const tabs = { live: {}, roi: {}, cameras: {}, gallery: {}, settings: {} };
 function showTab(name) {
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".tab").forEach(s => s.classList.toggle("active", s.id === "tab-" + name));
   try { localStorage.setItem("tab", name); } catch (e) { /* storage unavailable */ }
   if (tabs[name].onShow) tabs[name].onShow();
 }
-$("#tabs").addEventListener("click", e => { if (e.target.dataset.tab) showTab(e.target.dataset.tab); });
+$("#tabs").addEventListener("click", e => {
+  const b = e.target.closest("button[data-tab]");
+  if (b) showTab(b.dataset.tab);
+});
+
+/* "2026-11-02 10:30:15" (local time) -> "12s ago" */
+function timeAgo(ts) {
+  const t = new Date((ts || "").replace(" ", "T")).getTime();
+  if (!t) return "";
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return ts.slice(0, 16);
+}
+
+/* Debounce: many quick changes (e.g. ticking several classes) -> one request -> one camera restart. */
+function debounce(fn, ms) {
+  let t;
+  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+/* Shared full-size viewer for Live "recent" and the Gallery. */
+let lbItem = null, lbOnDeleted = null;
+function openLightbox(item, onDeleted) {
+  lbItem = item; lbOnDeleted = onDeleted || null;
+  $("#lb-img").src = "/api/captures/" + item.path;
+  $("#lb-name").textContent = `${item.camera} | ${item.class} | ${item.ts || item.name}`;
+  $("#lightbox").hidden = false;
+}
+function closeLightbox() { $("#lightbox").hidden = true; lbItem = null; $("#lb-img").removeAttribute("src"); }
+$("#lb-close").addEventListener("click", closeLightbox);
+$("#lightbox").addEventListener("click", e => { if (e.target.id === "lightbox") closeLightbox(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeLightbox(); });
+$("#lb-del").addEventListener("click", async () => {
+  if (!lbItem || !confirm("Delete this image?")) return;
+  try {
+    await api("/captures/" + lbItem.path, { method: "DELETE" });
+    const cb = lbOnDeleted; closeLightbox(); if (cb) cb();
+  } catch (e) { /* toast shown */ }
+});
 
 let camerasCache = [];
 async function loadCameras() {
@@ -56,7 +96,7 @@ async function loadCameras() {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  let t = "live";
-  try { t = localStorage.getItem("tab") || "live"; } catch (e) { /* ignore */ }
+  let t = location.hash.slice(1) || "live";     // deep link: /#settings
+  if (!location.hash) { try { t = localStorage.getItem("tab") || "live"; } catch (e) { /* ignore */ } }
   showTab(tabs[t] ? t : "live");
 });

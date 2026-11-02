@@ -90,6 +90,7 @@ def test_model_classes_and_defaults(env):
     c, _ = env
     r = c.get("/api/model/classes").get_json()
     assert r["names"] == ["car", "bus", "truck"] and r["selected"] == ["car", "bus", "truck"]
+    assert r["default"] == ["car", "bus", "truck"]
 
 
 def test_settings_validation_and_persistence(env):

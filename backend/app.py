@@ -211,7 +211,8 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
         except Exception as e:  # noqa: BLE001
             return err(f"Could not load model: {e}")
         selected, warns = class_selection(dict(c, MODEL=model), names)
-        return jsonify({"names": list(names.values()), "selected": selected, "warnings": warns})
+        return jsonify({"names": list(names.values()), "selected": selected, "warnings": warns,
+                        "default": capture_engine.default_classes(names)})
 
     # ---- capture control --------------------------------------------------
     def start_worker(cid):
