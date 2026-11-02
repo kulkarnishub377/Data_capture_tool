@@ -6,6 +6,8 @@ from pathlib import Path
 # key -> (section, default)
 DEFAULTS = {
     "DEBUG": ("App", True),
+    "HOST": ("App", "0.0.0.0"),
+    "PORT": ("App", 5100),
     "MODELS_DIR": ("Paths", "../models"),
     "OUTPUT_DIR": ("Paths", "./captures"),
     "MODEL": ("Model", "yolov8s.pt"),
@@ -28,7 +30,7 @@ DEFAULTS = {
 CHOICES = {"SAVE_MODE": {"frame", "crop", "both"}, "WHEN": {"first", "best"}}
 RANGES = {  # key -> (min, max), inclusive
     "CONF_THRESH": (0.01, 1.0), "MIN_ROI_OVERLAP": (0.0, 1.0), "MIN_BOX": (1, 5000),
-    "DEDUP_SECONDS": (0, 120), "MAX_HOLD_SECONDS": (1, 600), "JPEG_QUALITY": (1, 100), "IMG_SIZE": (160, 2048),
+    "PORT": (1, 65535), "DEDUP_SECONDS": (0, 120), "MAX_HOLD_SECONDS": (1, 600), "JPEG_QUALITY": (1, 100), "IMG_SIZE": (160, 2048),
     "PAD_NORMAL": (0.0, 2.0), "PAD_BIKE": (0.0, 2.0),
 }
 

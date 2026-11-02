@@ -85,4 +85,6 @@ Class names may contain underscores (`auto_rickshaw`); the camera comes from the
 - A worker exception sets state `error`, sets the stop event (so the saver exits) and `start` replaces it.
 - Path traversal: all capture/thumbnail paths go through `storage.safe_capture_path` (rejects `..`, backslashes,
   absolute and drive paths; only `.jpg`).
-- Flask debug mode is on by default but bound to 127.0.0.1 with the reloader off.
+- The service binds `HOST` (default `0.0.0.0`) on `PORT` from `config.ini` and has no authentication: run it on a trusted network.
+  `app.server_options()` keeps Flask's interactive debugger off whenever the host is not loopback (DEBUG logging stays on); the reloader is always off.
+  No browser is opened at start; the banner prints the local and LAN URLs.

@@ -1,13 +1,13 @@
 """Data Capture Tool - Flask backend (REST API + MJPEG preview).
 
-Run:  python backend/app.py        (serves the frontend/ folder at http://127.0.0.1:5100)
+Run:  python backend/app.py        (serves the frontend/ folder; host and port come from config.ini [App])
 """
 import logging
 import os
 import sys
+import socket
 import threading
 import time
-import webbrowser
 from pathlib import Path
 
 import cv2
@@ -415,23 +415,65 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
     return app
 
 
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def server_options(cfg, env) -> dict:
+    """Where and how to serve. config.ini [App] HOST/PORT, optionally overridden by the HOST / PORT env vars.
+
+    The interactive debugger is a remote-code-execution console, so it is only ever enabled when the server is
+    reachable from this machine alone (loopback). DEBUG logging stays on either way."""
+    host = env.get("HOST") or cfg["HOST"]
+    try:
+        port = int(env.get("PORT") or cfg["PORT"])
+    except ValueError:
+        raise ValueError(f"PORT must be a number, got {env.get('PORT')!r}") from None
+    if not 1 <= port <= 65535:
+        raise ValueError(f"PORT must be between 1 and 65535, got {port}")
+    return {"host": host, "port": port, "debug": bool(cfg["DEBUG"]),
+            "use_debugger": bool(cfg["DEBUG"]) and host in LOOPBACK_HOSTS, "use_reloader": False}
+
+
+def lan_addresses() -> list:
+    """This machine's non-loopback IPv4 addresses (what other machines would type to reach it)."""
+    found = set()
+    try:
+        found.update(socket.gethostbyname_ex(socket.gethostname())[2])
+    except OSError:
+        pass
+    try:  # the address of the interface that routes outwards (no packet is sent)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))
+            found.add(s.getsockname()[0])
+    except OSError:
+        pass
+    return sorted(ip for ip in found if ip.count(".") == 3 and not ip.startswith("127."))
+
+
 def main():
     config_path = os.environ.get("DCT_CONFIG") or ROOT / "config.ini"
     cfg = settings.load(config_path)
-    debug = cfg["DEBUG"]
-    logging.basicConfig(level=logging.DEBUG if debug else logging.INFO,
+    opts = server_options(cfg, os.environ)
+    logging.basicConfig(level=logging.DEBUG if opts["debug"] else logging.INFO,
                         format="[%(asctime)s] %(levelname)s %(name)s: %(message)s", datefmt="%H:%M:%S")
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
     logging.getLogger("PIL").setLevel(logging.WARNING)
-    port = int(os.environ.get("PORT", 5100))
     app = create_app(config_path, os.environ.get("DCT_DATA"))
     # importing torch takes seconds: do it now so the first page load is quick
     threading.Thread(target=devices.detect, daemon=True).start()
-    if os.environ.get("NO_BROWSER") != "1":
-        threading.Timer(1.2, lambda: webbrowser.open(f"http://127.0.0.1:{port}")).start()
-    print(f"Data Capture Tool running at http://127.0.0.1:{port}  (debug={'on' if debug else 'off'})")
+
+    host, port = opts["host"], opts["port"]
+    print(f"Data Capture Tool listening on {host}:{port}  (debug={'on' if opts['debug'] else 'off'})")
+    print(f"  this machine : http://127.0.0.1:{port}")
+    if host in ("0.0.0.0", "::"):
+        for ip in lan_addresses():
+            print(f"  other machines: http://{ip}:{port}")
+        print("  (no login: expose it on a trusted network only; allow the port in the firewall)")
+    if opts["debug"] and not opts["use_debugger"]:
+        print("  interactive debugger is OFF because the server is reachable from the network (DEBUG logs stay on)")
     # use_reloader=False: the reloader would restart the process and kill running captures
-    app.run(host="127.0.0.1", port=port, threaded=True, debug=debug, use_reloader=False)
+    app.run(host=host, port=port, threaded=True, debug=opts["debug"],
+            use_debugger=opts["use_debugger"], use_reloader=opts["use_reloader"])
 
 
 if __name__ == "__main__":

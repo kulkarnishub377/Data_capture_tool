@@ -5,7 +5,7 @@
 > database (JSON + image files). Browser UI: Live view with recent captures, ROI editor, cameras, gallery, settings.
 
 Key facts for tools and agents:
-- Run: `python backend/app.py` (port 5100). Tests: `python -m pytest` (integration needs ../vedio and ../models).
+- Run: `python backend/app.py` (listens on HOST/PORT from config.ini, default 0.0.0.0:5100; no browser is opened; no login). Tests: `python -m pytest` (integration needs ../vedio and ../models).
 - State: `config.ini` (settings), `data/cameras.json` (cameras + `rois`), `captures/<cam>/<date>/frame|crop/*.jpg`.
 - Backend in `backend/`, frontend in `frontend/`. No build step, no database.
 - One capture per vehicle: tracker-ID switches are re-linked by motion prediction; the best frame is buffered (a better one replaces the older) and saved once when the vehicle leaves the ROI.

@@ -12,7 +12,7 @@ A compact index is in `llms.txt`; the whole documentation in one file is `llms-f
 
 ## Run and test
 ```bash
-python backend/app.py                                  # http://127.0.0.1:5100  (PORT, NO_BROWSER=1, DCT_CONFIG, DCT_DATA)
+python backend/app.py                                  # HOST/PORT from config.ini [App] (env HOST, PORT override; DCT_CONFIG, DCT_DATA)
 python -m pytest --ignore=backend/tests/test_integration.py     # fast suite (~10 s)
 python -m pytest                                       # + real-model integration (~100 s; needs ../vedio and ../models)
 python scripts/build_llms_full.py                      # regenerate llms-full.txt after editing README/docs/AGENTS
@@ -36,6 +36,8 @@ real `config.ini` or `data/cameras.json` (it holds a real camera URL with a pass
 - **Capture logic** (`capture_logic.py`) is per *vehicle*, not per tracker id: it links ID switches by motion prediction, buffers
   the best frame and saves once. A vehicle that is still detected must never absorb a new track (two close cars stay two),
   and a different car arriving later must not be absorbed (it would be lost). Both have regression tests - keep them.
+- **Network exposure**: the service binds `0.0.0.0` by default and has no login. `server_options()` must keep the Werkzeug
+  interactive debugger OFF unless the host is loopback (it is remote code execution). It never opens a browser.
 - Windows is the primary platform: use `pathlib`, avoid shell-specific code, `taskkill` not `kill`.
 
 ## Gotchas

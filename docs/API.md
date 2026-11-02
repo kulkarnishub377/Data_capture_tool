@@ -1,6 +1,6 @@
 # HTTP API
 
-Base URL `http://127.0.0.1:5100`. JSON unless noted. Errors: `{"error": "message"}` with status 400/404/502.
+Base URL `http://<host>:<PORT>` (default port 5100; the service listens on `0.0.0.0`, there is no authentication). JSON unless noted. Errors: `{"error": "message"}` with status 400/404/502.
 Camera objects returned by the API have the RTSP password replaced by `****`.
 
 ## Cameras

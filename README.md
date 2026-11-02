@@ -21,7 +21,16 @@ pip install -r requirements.txt
 python backend/app.py            # or double-click start.bat
 ```
 
-The browser opens at <http://127.0.0.1:5100>. Then:
+The service listens on all network interfaces (`HOST = 0.0.0.0`) on the port set in `config.ini` (default **5100**).
+It does **not** open a browser. At start it prints the addresses to use:
+
+```
+Data Capture Tool listening on 0.0.0.0:5100
+  this machine : http://127.0.0.1:5100
+  other machines: http://<this-pc-ip>:5100
+```
+
+Open one of those in a browser (other machines use the second address; allow the port in the firewall). Then:
 
 1. **Cameras** tab - add a name and RTSP URL (`rtsp://user:pass@host:554/stream`), press **Test**.
 2. **ROI** tab - choose the camera, **Load snapshot**, click to place polygon points (drag to adjust).
@@ -139,8 +148,10 @@ Edit the file or use the Settings tab (the UI edits lines in place, so your comm
 
 | Section | Key | Default | Notes |
 |---|---|---|---|
-| App | `DEBUG` | `true` | Flask debug mode + DEBUG logging (reloader is off). |
-| Paths | `MODELS_DIR` | `../models` | Relative to `config.ini`. |
+| App | `DEBUG` | `true` | DEBUG logging + Flask debug mode (reloader off). The interactive debugger is **never** enabled when the server is reachable from the network. |
+| App | `HOST` | `0.0.0.0` | `0.0.0.0` = reachable from other machines; `127.0.0.1` = this machine only. |
+| App | `PORT` | `5100` | Web UI port (1 - 65535). Edit it here and restart the service. |
+| Paths | `MODELS_DIR` | `../models` | Relative to `config.ini`. A path starting with `/` is taken from the root of the drive/filesystem, e.g. `/_VIDES/_backend_service_combined/models` on the deployment device. |
 | Paths | `OUTPUT_DIR` | `./captures` | |
 | Model | `MODEL` | | file inside `MODELS_DIR` |
 | Model | `DEVICE` | `auto` | `auto`, `cpu`, `cuda:0`, `cuda:0,cuda:1` |
@@ -158,13 +169,15 @@ Edit the file or use the Settings tab (the UI edits lines in place, so your comm
 | Capture | `DEDUP_SECONDS` | `2` | 0 - 120. Window for re-linking a lost vehicle after a tracker ID switch |
 | Capture | `MAX_HOLD_SECONDS` | `10` | 1 - 600. Save a vehicle that stays inside the ROI this long |
 
-Environment variables: `PORT` (default 5100), `NO_BROWSER=1`, `DCT_CONFIG` and `DCT_DATA` (use another
+Environment variables: `HOST` and `PORT` (override `config.ini`), `DCT_CONFIG` and `DCT_DATA` (use another
 config file / data folder - handy for testing without touching your real setup).
 
 ## Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
+| Other machines cannot open the page | Check `HOST = 0.0.0.0`, that you use the address printed at start, and that the OS firewall allows the `PORT` (Windows: inbound rule for TCP 5100). |
+| No models in the dropdown | `MODELS_DIR` does not exist on this machine (e.g. `/_VIDES/...` is only on the deployment device) or has no `*.pt` files. |
 | Snapshot / Test says `Cannot reach host:port (timed out)` | The camera is offline, the port is wrong, or it is blocked. The tool checks the TCP port first so this fails in ~4 s instead of hanging. |
 | `did not respond with a picture` | Port is open but the stream path or credentials are wrong, or the camera is at its connection limit. |
 | Card says `reconnecting` | The stream dropped; it retries with backoff. The message under the chip says why. |
