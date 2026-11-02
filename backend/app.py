@@ -18,6 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import camera_io  # noqa: E402
 import capture_engine  # noqa: E402
 import devices  # noqa: E402
+import env_check  # noqa: E402
+import model_diag  # noqa: E402
 import settings  # noqa: E402
 import storage  # noqa: E402
 
@@ -30,7 +32,8 @@ log = logging.getLogger("app")
 def create_app(config_path=None, data_dir=None, frontend_dir=None,
                worker_factory=capture_engine.CameraWorker,
                names_loader=capture_engine.load_model_names,
-               device_detector=devices.detect, grabber=grab_frame):
+               device_detector=devices.detect, grabber=grab_frame,
+               model_prober=capture_engine.probe_model, environment_probe=env_check.collect):
     config_path = Path(config_path or ROOT / "config.ini")
     data_dir = Path(data_dir or ROOT / "data")
     frontend_dir = Path(frontend_dir or ROOT / "frontend")
@@ -61,10 +64,18 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
         return c
 
     def model_names(c, model):
+        """Class names of a model (cached). Raises with a user-ready message when the model cannot be loaded."""
         p = Path(c["MODELS_DIR"]) / model
+        problem = model_diag.model_file_problem(p)
+        if problem:
+            raise model_diag.ModelFileError(problem)
         key = (str(p), p.stat().st_mtime)
         if key not in names_cache:
-            names_cache[key] = names_loader(p)
+            try:
+                names_cache[key] = names_loader(p)
+            except Exception as e:  # noqa: BLE001
+                log.exception("could not load model %s", p)
+                raise model_diag.ModelFileError(model_diag.explain_model_error(e)) from e
         return names_cache[key]
 
     def class_selection(c, names):
@@ -169,7 +180,9 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
     @app.get("/api/models")
     def models_list():
         d = Path(cfg()["MODELS_DIR"])
-        return jsonify(sorted(p.name for p in d.glob("*.pt")) if d.is_dir() else [])
+        if not d.is_dir():
+            return jsonify([])
+        return jsonify(sorted(p.name for p in d.iterdir() if p.is_file() and p.suffix.lower() in model_diag.MODEL_EXTS))
 
     @app.get("/api/paths")
     def paths_info():
@@ -177,7 +190,7 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
         c = cfg()
         d = Path(c["MODELS_DIR"])
         return jsonify({"models_dir": str(d), "models_dir_exists": d.is_dir(),
-                        "models_count": len(list(d.glob("*.pt"))) if d.is_dir() else 0,
+                        "models_count": sum(1 for p in d.iterdir() if p.suffix.lower() in model_diag.MODEL_EXTS) if d.is_dir() else 0,
                         "output_dir": c["OUTPUT_DIR"]})
 
     @app.get("/api/devices")
@@ -217,10 +230,38 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
         try:
             names = model_names(c, model)
         except Exception as e:  # noqa: BLE001
-            return err(f"Could not load model: {e}")
+            return err(str(e))
         selected, warns = class_selection(dict(c, MODEL=model), names)
         return jsonify({"names": list(names.values()), "selected": selected, "warnings": warns,
                         "default": capture_engine.default_classes(names)})
+
+    @app.get("/api/environment")
+    def environment():
+        """What this Python environment can do (torch/CUDA, TensorRT, OpenCV backends) plus fixes for what is wrong."""
+        return jsonify(environment_probe())
+
+    @app.post("/api/model/test")
+    def model_test():
+        """Load the model and run a test frame on the device it will use; always answers 200 with {ok, ...}."""
+        c = cfg()
+        model = request.args.get("model") or c["MODEL"]
+        p = Path(c["MODELS_DIR"]) / model
+        if Path(model).name != model:
+            return jsonify({"ok": False, "model": model, "error": f"Model file not found: {model}"})
+        problem = model_diag.model_file_problem(p)
+        if problem:
+            return jsonify({"ok": False, "model": model, "error": problem})
+        pool, _ = devices.resolve(c["DEVICE"], [g["id"] for g in device_detector()])
+        device = pool[0]
+        t0 = time.time()
+        try:
+            names = model_prober(p, device, c["HALF"], c["IMG_SIZE"])
+        except Exception as e:  # noqa: BLE001
+            log.exception("model test failed for %s on %s", p, device)
+            return jsonify({"ok": False, "model": model, "device": device, "error": model_diag.explain_model_error(e)})
+        secs = round(time.time() - t0, 1)
+        return jsonify({"ok": True, "model": model, "device": device, "classes": len(names), "seconds": secs,
+                        "message": f"Loaded {len(names)} classes and ran a test frame on {device} in {secs} s"})
 
     # ---- capture control --------------------------------------------------
     def start_worker(cid):
@@ -236,7 +277,7 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
         try:
             names = model_names(c, c["MODEL"])
         except Exception as e:  # noqa: BLE001
-            return {"error": f"Could not load model: {e}"}, 400
+            return {"error": str(e)}, 400
         with wlock:
             old = workers.get(cid)
             if old and old.status()["state"] not in ("stopped", "error"):

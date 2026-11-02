@@ -27,6 +27,9 @@ Key facts for tools and agents:
 - [backend/storage.py](backend/storage.py): cameras.json store, image saving, gallery, recent, thumbnails
 - [backend/settings.py](backend/settings.py): config.ini load/save with validation
 - [backend/devices.py](backend/devices.py): GPU detection and camera-to-device assignment
+- [backend/model_diag.py](backend/model_diag.py): model-file checks and plain-language load-error hints
+- [backend/env_check.py](backend/env_check.py): environment report (CUDA torch, TensorRT, OpenCV) with fixes
+- [backend/torch_compat.py](backend/torch_compat.py): torch.load compatibility for trained checkpoints
 - [backend/camera_io.py](backend/camera_io.py): safe camera access (port check, timeouts)
 - [frontend/index.html](frontend/index.html): single page; scripts in frontend/static/js/
 - [backend/tests/](backend/tests/): pytest suite (unit, API with fake worker, real-model integration)

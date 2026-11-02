@@ -130,6 +130,12 @@ input[type=checkbox] { accent-color: var(--accent); min-height: 0; }
 .badge[hidden] { display: none; }
 .path-info { flex-basis: 100%; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .path-info.bad { color: var(--bad); }
+.path-info.ok { color: var(--ok); }
+.env-result { font-size: 13px; display: flex; flex-direction: column; gap: 3px; }
+.env-row b { display: inline-block; min-width: 110px; color: var(--muted); font-weight: 500; }
+.env-row.bad { color: var(--bad); }
+.env-warn { color: var(--warn); margin-top: 4px; }
+.env-ok { color: var(--ok); margin-top: 4px; }
 .pill { display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px; border-radius: 4px; font-size: 13px; font-weight: 500;
   border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--muted); }
 .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); }

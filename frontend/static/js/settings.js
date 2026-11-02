@@ -220,9 +220,53 @@
     $("#conf-range").value = s.CONF_THRESH;
     $("#conf-num").value = s.CONF_THRESH;
     for (const [sel, [key]] of Object.entries(NUM)) $(sel).value = s[key];
-    if (models.includes(s.MODEL)) await loadClasses(s.MODEL);
+    setModelStatus("");
+    if (models.includes(s.MODEL)) {
+      try { await loadClasses(s.MODEL); }
+      catch (e) { setModelStatus(e.message, true); }          // keep the rest of the page usable, show WHY it failed
+    }
     updateBar();
   }
+
+  function setModelStatus(text, bad = false) {
+    const el = $("#model-status");
+    el.hidden = !text;
+    el.textContent = text;
+    el.className = "path-info" + (bad ? " bad" : " ok");
+  }
+
+  $("#env-check").addEventListener("click", async () => {
+    const btn = $("#env-check"), box = $("#env-result");
+    btn.disabled = true; box.hidden = false; box.replaceChildren(h("span", { class: "hint" }, "Checking..."));
+    try {
+      const f = await api("/environment");
+      const arm = /aarch64|arm64/i.test(f.machine);
+      const row = (k, v, bad) => h("div", { class: "env-row" + (bad ? " bad" : "") }, h("b", {}, k), " ", v);
+      const t = f.torch || {}, rt = f.tensorrt || {}, cv = f.opencv || {};
+      const rows = [
+        row("Python", `${f.version} (${f.machine}) ${f.in_venv ? "in a venv" + (f.system_site_packages ? " with system packages" : " WITHOUT system packages") : "(system)"}`, f.in_venv && !f.system_site_packages && arm),
+        row("PyTorch", t.error ? "not available" : `${t.version}, CUDA ${t.cuda ? "yes" + (t.gpu ? " (" + t.gpu + ")" : "") : "NO"}`, !!t.error || !t.cuda),
+        row("TensorRT", rt.error ? "not available" : rt.version, !!rt.error && arm),
+        row("OpenCV", cv.error ? "not available" : `${cv.version}, GStreamer ${cv.gstreamer ? "yes" : "no"}, FFmpeg ${cv.ffmpeg ? "yes" : "no"}`, !!cv.error || !cv.ffmpeg),
+        row("Ultralytics", f.ultralytics || "not installed", !f.ultralytics),
+        row("Tracker (lap)", f.lap ? "yes" : "missing", !f.lap),
+      ];
+      const warns = (f.warnings || []).map(w => h("div", { class: "env-warn" }, h("i", { class: "fa-solid fa-triangle-exclamation" }), " ", w));
+      box.replaceChildren(...rows, ...(warns.length ? warns : [h("div", { class: "env-ok" }, h("i", { class: "fa-solid fa-circle-check" }), " Environment looks fine.")]));
+    } catch (e) { box.replaceChildren(h("span", { class: "path-info bad" }, e.message)); }
+    btn.disabled = false;
+  });
+
+  $("#model-test").addEventListener("click", async () => {
+    const btn = $("#model-test"), model = $("#sel-model").value;
+    btn.disabled = true;
+    setModelStatus("Testing: loading the model and running a test frame on the selected device...");
+    try {
+      const r = await api(`/model/test?model=${encodeURIComponent(model)}`, { method: "POST" });
+      setModelStatus(r.ok ? `OK - ${r.message}` : `FAILED - ${r.error}`, !r.ok);
+    } catch (e) { setModelStatus(e.message, true); }
+    btn.disabled = false;
+  });
 
   $("#sel-model").addEventListener("change", async e => {
     const model = e.target.value;

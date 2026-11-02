@@ -187,6 +187,7 @@ config file / data folder - handy for testing without touching your real setup).
 | Symptom | Cause / fix |
 |---|---|
 | Other machines cannot open the page | Check `HOST = 0.0.0.0`, that you use the address printed at start, and that the OS firewall allows the `PORT` (Windows: inbound rule for TCP 5100). |
+| Model does not load / Start says "Could not load model" | Settings > Model: press **Test model** (exact error + hint) and **Check environment**. Typical causes: the venv cannot see the system CUDA torch / TensorRT (`--system-site-packages`), a `.engine` built on another device, a Git LFS pointer or truncated file instead of the real model, an older Ultralytics than the one that trained the model. |
 | No models in the dropdown | `MODELS_DIR` does not exist for the user running the service, or has no `*.pt` files. Settings > Model shows the resolved folder and whether it was found (`GET /api/paths`). |
 | Snapshot / Test says `Cannot reach host:port (timed out)` | The camera is offline, the port is wrong, or it is blocked. The tool checks the TCP port first so this fails in ~4 s instead of hanging. |
 | `did not respond with a picture` | Port is open but the stream path or credentials are wrong, or the camera is at its connection limit. |
@@ -197,6 +198,33 @@ config file / data folder - handy for testing without touching your real setup).
 | One vehicle captured twice | Raise **Duplicate window** a little (e.g. 3-4 s) or use a faster model/device so the tracker keeps up; check `Best frame` mode is on. Two vehicles close together are deliberately kept separate. |
 | Nothing is captured | Check the ROI covers the road, confidence is not too high, classes include the vehicle type, and min size/overlap are not too strict. |
 | Stop takes a few seconds | The stream was hung; shutdown waits for the reader (max ~10 s). |
+
+## Running on a Linux / Jetson device
+
+```bash
+bash start.sh                  # uses ./venv if present, else python3  (PYTHON=/path/to/python bash start.sh to choose)
+```
+
+On an NVIDIA Jetson, CUDA PyTorch, TensorRT and the GStreamer OpenCV normally come from JetPack as **system**
+packages. Install so that pip does not hide them (see `requirements-jetson.txt`):
+
+```bash
+python3 -m venv --system-site-packages venv && source venv/bin/activate
+pip install --no-deps ultralytics && pip install -r requirements-jetson.txt
+```
+
+Do not `pip install torch`, `torchvision`, `tensorrt` or `opencv-python` there. A venv created *without*
+`--system-site-packages`, or with pip's own torch/OpenCV, cannot see the GPU or TensorRT and models will not load.
+You can also reuse an existing venv on the device that already runs your other AI services.
+
+**Do not guess - ask the device.** In *Settings > Model & device*:
+- **Check environment** shows what this Python can use (PyTorch + CUDA, TensorRT, OpenCV with GStreamer/FFmpeg,
+  Ultralytics, the `lap` tracker module) and prints a plain-language fix for each problem.
+- **Test model** loads the selected model and runs one test frame on the configured device, then reports success or
+  the exact error with a hint (Git LFS pointer, truncated file, wrong Ultralytics version, missing CUDA/TensorRT...).
+
+Model files: `*.pt` (PyTorch), `*.engine` (TensorRT, much faster on a Jetson; must be built **on that device**) and
+`*.onnx` are all listed. `.engine` files need a CUDA GPU (`DEVICE = auto` or `cuda:0`), never `cpu`.
 
 ## Development and tests
 
@@ -249,6 +277,9 @@ Browser (frontend/)  <--HTTP/JSON, MJPEG-->  Flask app (backend/app.py)
 | `storage.py` | `CameraStore` (atomic JSON, migrates old single `roi` -> `rois`), `save_capture`, `list_captures`, `recent_captures`, `make_thumbnail`, `safe_capture_path`, `delete_capture`, `mask_url`. |
 | `settings.py` | `load` / `save` for `config.ini`: typed values, defaults, choice + range validation, line-preserving writes. |
 | `devices.py` | `detect` (cached GPU probe), `resolve` (parse `DEVICE`, fall back with warnings), `assign` (round-robin cameras over devices). |
+| `model_diag.py` | `model_file_problem` (missing / empty / Git LFS pointer / truncated), `explain_model_error` (adds a plain-language hint to load errors), `MODEL_EXTS`. |
+| `env_check.py` | `collect()` (torch/CUDA, TensorRT, OpenCV backends, ultralytics, lap) and `build_warnings()` (pure: turns the facts into fixes, e.g. a Jetson venv without `--system-site-packages`). |
+| `torch_compat.py` | `apply()`: restores `torch.load(weights_only=False)` for our own trusted checkpoints (PyTorch >= 2.6); called before ultralytics is imported. |
 | `camera_io.py` | `CameraError`, `check_port`, `run_with_timeout`, `open_capture` (5 s open/read timeouts), `grab_frame`. |
 
 ## Capture logic (`capture_logic.CaptureLogic.process`)
@@ -338,7 +369,9 @@ Camera objects returned by the API have the RTSP password replaced by `****`.
 |---|---|
 | `GET /api/settings` | all `config.ini` values, typed |
 | `PUT /api/settings` | partial update. Validates choices/ranges (400 on error). If any worker-relevant key actually changed, running cameras restart once (counters kept). `MODEL` must exist in `MODELS_DIR`. |
-| `GET /api/models` | sorted `*.pt` names in `MODELS_DIR` |
+| `GET /api/models` | sorted model files in `MODELS_DIR`: `*.pt`, `*.engine` (TensorRT), `*.onnx` |
+| `POST /api/model/test?model=` | loads the model and runs one blank test frame on the configured device. Always 200: `{ok:true, model, device, classes, seconds, message}` or `{ok:false, model, device?, error}` where `error` has a plain-language hint |
+| `GET /api/environment` | what this Python can use: `{python, version, machine, in_venv, system_site_packages, torch:{version,cuda,gpu}, tensorrt, opencv:{version,gstreamer,ffmpeg}, ultralytics, lap, warnings:[...]}` |
 | `GET /api/paths` | `{models_dir, models_dir_exists, models_count, output_dir}`: the resolved folders (`~`, env vars and relative paths expanded) |
 | `GET /api/model/classes?model=` | `{names, selected, default, warnings}`; `selected` honours `CLASSES`, unknown names go to `warnings` |
 | `GET /api/devices` | `{gpus:[{id,name,memory_mb}], pool, warnings}` |
@@ -399,6 +432,8 @@ real `config.ini` or `data/cameras.json` (it holds a real camera URL with a pass
 - **`settings.save` edits lines in place** (comments survive). Add new keys to `DEFAULTS` (+ `CHOICES`/`RANGES`)
   and to `WORKER_KEYS` in `app.py` if a running worker must restart when it changes.
 - **ROI data model** is `rois` (list of polygons). `roi.py` functions accept one polygon or a list.
+- **Model loading failures must explain themselves**: go through `model_diag` (`ModelFileError`, `explain_model_error`) and surface the text in
+  the UI (Settings > Test model / Check environment). The deployment target is a Jetson whose setup you cannot see - never assume it.
 - **Never expose camera passwords**: API responses go through `public()` / `storage.mask_url`.
 - **Paths from clients** must go through `storage.safe_capture_path`. **Configured folders** (`MODELS_DIR`, `OUTPUT_DIR`) go through
   `settings.resolve_path` (`~`, env vars, relative-to-config, absolute) - never `base / value` directly.

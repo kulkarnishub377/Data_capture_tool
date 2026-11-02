@@ -28,6 +28,8 @@ real `config.ini` or `data/cameras.json` (it holds a real camera URL with a pass
 - **`settings.save` edits lines in place** (comments survive). Add new keys to `DEFAULTS` (+ `CHOICES`/`RANGES`)
   and to `WORKER_KEYS` in `app.py` if a running worker must restart when it changes.
 - **ROI data model** is `rois` (list of polygons). `roi.py` functions accept one polygon or a list.
+- **Model loading failures must explain themselves**: go through `model_diag` (`ModelFileError`, `explain_model_error`) and surface the text in
+  the UI (Settings > Test model / Check environment). The deployment target is a Jetson whose setup you cannot see - never assume it.
 - **Never expose camera passwords**: API responses go through `public()` / `storage.mask_url`.
 - **Paths from clients** must go through `storage.safe_capture_path`. **Configured folders** (`MODELS_DIR`, `OUTPUT_DIR`) go through
   `settings.resolve_path` (`~`, env vars, relative-to-config, absolute) - never `base / value` directly.

@@ -15,8 +15,10 @@ import cv2
 import numpy as np
 
 import camera_io
+import model_diag
 import roi
 import storage
+import torch_compat
 from capture_logic import CaptureLogic, Detection  # noqa: F401  (re-exported)
 
 log = logging.getLogger("capture")
@@ -39,8 +41,9 @@ class YoloDetector:
     """Runs a YOLO model with ByteTrack on the (margin-expanded) ROI bounding box."""
 
     def __init__(self, model_path, device, half, conf, imgsz, class_names, polys, frame_size):
+        torch_compat.apply()
         from ultralytics import YOLO
-        self.model = YOLO(str(model_path))
+        self.model = YOLO(str(model_path), task="detect")
         self.device = device
         self.half = bool(half and device.startswith("cuda"))
         self.conf, self.imgsz = conf, imgsz
@@ -68,8 +71,19 @@ class YoloDetector:
 
 
 def load_model_names(model_path) -> dict:
+    torch_compat.apply()
     from ultralytics import YOLO
-    return dict(YOLO(str(model_path)).names)
+    return dict(YOLO(str(model_path), task="detect").names)
+
+
+def probe_model(model_path, device, half, imgsz) -> dict:
+    """Load the model and run ONE blank frame on `device`: finds CUDA / TensorRT problems before capture starts."""
+    torch_compat.apply()
+    from ultralytics import YOLO
+    model = YOLO(str(model_path), task="detect")
+    model.predict(np.zeros((imgsz, imgsz, 3), np.uint8), device=device, imgsz=imgsz,
+                  half=bool(half and device.startswith("cuda")), verbose=False)
+    return dict(model.names)
 
 
 class LatestFrameReader:
@@ -214,7 +228,7 @@ class CameraWorker:
                     self._stop.wait(1.0)
         except Exception as e:  # noqa: BLE001 - surface in UI, never crash the app
             log.exception("worker failed")
-            self._set("error", str(e))
+            self._set("error", model_diag.explain_model_error(e))
             self._stop.set()    # lets the saver thread finish; Start will build a fresh worker
             return
         if self._logic:

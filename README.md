@@ -177,6 +177,7 @@ config file / data folder - handy for testing without touching your real setup).
 | Symptom | Cause / fix |
 |---|---|
 | Other machines cannot open the page | Check `HOST = 0.0.0.0`, that you use the address printed at start, and that the OS firewall allows the `PORT` (Windows: inbound rule for TCP 5100). |
+| Model does not load / Start says "Could not load model" | Settings > Model: press **Test model** (exact error + hint) and **Check environment**. Typical causes: the venv cannot see the system CUDA torch / TensorRT (`--system-site-packages`), a `.engine` built on another device, a Git LFS pointer or truncated file instead of the real model, an older Ultralytics than the one that trained the model. |
 | No models in the dropdown | `MODELS_DIR` does not exist for the user running the service, or has no `*.pt` files. Settings > Model shows the resolved folder and whether it was found (`GET /api/paths`). |
 | Snapshot / Test says `Cannot reach host:port (timed out)` | The camera is offline, the port is wrong, or it is blocked. The tool checks the TCP port first so this fails in ~4 s instead of hanging. |
 | `did not respond with a picture` | Port is open but the stream path or credentials are wrong, or the camera is at its connection limit. |
@@ -187,6 +188,33 @@ config file / data folder - handy for testing without touching your real setup).
 | One vehicle captured twice | Raise **Duplicate window** a little (e.g. 3-4 s) or use a faster model/device so the tracker keeps up; check `Best frame` mode is on. Two vehicles close together are deliberately kept separate. |
 | Nothing is captured | Check the ROI covers the road, confidence is not too high, classes include the vehicle type, and min size/overlap are not too strict. |
 | Stop takes a few seconds | The stream was hung; shutdown waits for the reader (max ~10 s). |
+
+## Running on a Linux / Jetson device
+
+```bash
+bash start.sh                  # uses ./venv if present, else python3  (PYTHON=/path/to/python bash start.sh to choose)
+```
+
+On an NVIDIA Jetson, CUDA PyTorch, TensorRT and the GStreamer OpenCV normally come from JetPack as **system**
+packages. Install so that pip does not hide them (see `requirements-jetson.txt`):
+
+```bash
+python3 -m venv --system-site-packages venv && source venv/bin/activate
+pip install --no-deps ultralytics && pip install -r requirements-jetson.txt
+```
+
+Do not `pip install torch`, `torchvision`, `tensorrt` or `opencv-python` there. A venv created *without*
+`--system-site-packages`, or with pip's own torch/OpenCV, cannot see the GPU or TensorRT and models will not load.
+You can also reuse an existing venv on the device that already runs your other AI services.
+
+**Do not guess - ask the device.** In *Settings > Model & device*:
+- **Check environment** shows what this Python can use (PyTorch + CUDA, TensorRT, OpenCV with GStreamer/FFmpeg,
+  Ultralytics, the `lap` tracker module) and prints a plain-language fix for each problem.
+- **Test model** loads the selected model and runs one test frame on the configured device, then reports success or
+  the exact error with a hint (Git LFS pointer, truncated file, wrong Ultralytics version, missing CUDA/TensorRT...).
+
+Model files: `*.pt` (PyTorch), `*.engine` (TensorRT, much faster on a Jetson; must be built **on that device**) and
+`*.onnx` are all listed. `.engine` files need a CUDA GPU (`DEVICE = auto` or `cuda:0`), never `cpu`.
 
 ## Development and tests
 

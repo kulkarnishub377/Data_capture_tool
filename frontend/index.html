@@ -143,7 +143,18 @@
             <div class="sctl">
               <select id="sel-model"></select>
               <span id="model-info" class="badge" hidden></span>
+              <button id="model-test" class="btn sm" type="button" title="Load the model and run a test frame on the selected device"><i class="fa-solid fa-vial"></i> Test model</button>
+              <small id="model-status" class="path-info" hidden></small>
               <small id="models-dir-info" class="path-info"></small>
+            </div>
+          </div>
+
+          <div class="srow no-draft">
+            <div class="slabel"><label>Environment</label>
+              <small>Checks what this device's Python can use: CUDA PyTorch, TensorRT (needed for .engine models), OpenCV.</small></div>
+            <div class="sctl col">
+              <div><button id="env-check" class="btn sm" type="button"><i class="fa-solid fa-stethoscope"></i> Check environment</button></div>
+              <div id="env-result" class="env-result" hidden></div>
             </div>
           </div>
 

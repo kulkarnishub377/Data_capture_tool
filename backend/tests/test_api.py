@@ -34,8 +34,8 @@ class FakeWorker:
 @pytest.fixture
 def env(tmp_path):
     (tmp_path / "models").mkdir()
-    (tmp_path / "models" / "a.pt").write_bytes(b"x")
-    (tmp_path / "models" / "b.pt").write_bytes(b"x")
+    (tmp_path / "models" / "a.pt").write_bytes(b"x" * 20000)
+    (tmp_path / "models" / "b.pt").write_bytes(b"x" * 20000)
     cfg = tmp_path / "config.ini"
     settings.save(cfg, {"MODELS_DIR": "models", "OUTPUT_DIR": "captures", "MODEL": "a.pt"})
     FakeWorker.instances.clear()

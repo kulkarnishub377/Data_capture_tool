@@ -26,6 +26,9 @@ Browser (frontend/)  <--HTTP/JSON, MJPEG-->  Flask app (backend/app.py)
 | `storage.py` | `CameraStore` (atomic JSON, migrates old single `roi` -> `rois`), `save_capture`, `list_captures`, `recent_captures`, `make_thumbnail`, `safe_capture_path`, `delete_capture`, `mask_url`. |
 | `settings.py` | `load` / `save` for `config.ini`: typed values, defaults, choice + range validation, line-preserving writes. |
 | `devices.py` | `detect` (cached GPU probe), `resolve` (parse `DEVICE`, fall back with warnings), `assign` (round-robin cameras over devices). |
+| `model_diag.py` | `model_file_problem` (missing / empty / Git LFS pointer / truncated), `explain_model_error` (adds a plain-language hint to load errors), `MODEL_EXTS`. |
+| `env_check.py` | `collect()` (torch/CUDA, TensorRT, OpenCV backends, ultralytics, lap) and `build_warnings()` (pure: turns the facts into fixes, e.g. a Jetson venv without `--system-site-packages`). |
+| `torch_compat.py` | `apply()`: restores `torch.load(weights_only=False)` for our own trusted checkpoints (PyTorch >= 2.6); called before ultralytics is imported. |
 | `camera_io.py` | `CameraError`, `check_port`, `run_with_timeout`, `open_capture` (5 s open/read timeouts), `grab_frame`. |
 
 ## Capture logic (`capture_logic.CaptureLogic.process`)

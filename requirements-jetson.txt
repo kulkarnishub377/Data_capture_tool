@@ -1,0 +1,22 @@
+# Linux / NVIDIA Jetson (ARM) install - for a device whose CUDA PyTorch, TensorRT and OpenCV come from the SYSTEM
+# (JetPack). Do NOT let pip install torch, torchvision, tensorrt, numpy or opencv-python: pip's builds hide the working
+# system ones (a pip torch cannot use a Jetson GPU, a pip OpenCV drops GStreamer, and tensorrt is not on PyPI for Jetson).
+#
+#   python3 -m venv --system-site-packages venv        # the venv must be able to see the system packages
+#   source venv/bin/activate
+#   pip install --no-deps ultralytics                  # --no-deps: ultralytics would otherwise pull torch + opencv
+#   pip install -r requirements-jetson.txt
+#   pip uninstall opencv-python opencv-python-headless # only if pip installed one by accident
+#   python backend/app.py                              # then: Settings > Check environment, Test model
+#
+# Everything below is pure Python (or has ARM wheels) and safe to install with pip.
+flask>=3.0.0
+lapx>=0.5.5                 # ByteTrack linear assignment (needed by the tracker)
+pyyaml
+requests
+scipy
+matplotlib
+psutil
+polars
+pillow
+ultralytics-thop
