@@ -52,7 +52,10 @@ def explain_model_error(exc) -> str:
     elif "libnvinfer" in low or "tensorrt" in low:
         hints.append("TensorRT problem: a .engine file only works with the TensorRT version and GPU it was built on - "
                      "export it again on this device, or use the .pt file.")
-    if "cuda" in low or "cudnn" in low:
+    if "stream is capturing" in low or "streamcapture" in low:
+        hints.append("Two threads used the GPU at the same time (a CUDA graph was being captured while another camera ran "
+                     "inference). The service serialises GPU access, so restart it; if it keeps happening, report it.")
+    elif "cuda" in low or "cudnn" in low:
         hints.append("CUDA problem: the installed PyTorch cannot use this GPU (JetPack/PyTorch mismatch) or the GPU is busy. "
                      "Set DEVICE = cpu in config.ini to confirm the model itself is fine, then fix the PyTorch install.")
     return text + (" - " + " ".join(hints) if hints else "")

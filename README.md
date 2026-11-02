@@ -161,6 +161,11 @@ Edit the file or use the Settings tab (the UI edits lines in place, so your comm
 | Model | `CLASSES` | empty | class **names**, comma separated; empty = auto |
 | Capture | `SAVE_MODE` | `frame` | `frame` / `crop` / `both` |
 | Capture | `SAVE_METADATA` | `false` | |
+| Camera | `STREAM_BACKEND` | `auto` | `auto` (GStreamer hardware decode, FFmpeg fallback) / `gstreamer` / `ffmpeg` |
+| Camera | `GST_CODEC` | `h264` | `h264` / `h265` / `auto` |
+| Camera | `GST_PROTOCOLS` | `tcp` | `tcp` / `udp` |
+| Camera | `GST_LATENCY_MS` | `50` | 0 - 5000 |
+| Camera | `GST_DECODER` | `nvv4l2decoder` | GStreamer decoder element (e.g. `avdec_h264` for software) |
 | Capture | `WHEN` | `best` | `best` (buffer the best frame, save once) / `first` (save immediately) |
 | Capture | `MIN_BOX` | `40` | 1 - 5000 |
 | Capture | `MIN_ROI_OVERLAP` | `0.5` | 0 - 1 |
@@ -177,6 +182,7 @@ config file / data folder - handy for testing without touching your real setup).
 | Symptom | Cause / fix |
 |---|---|
 | Other machines cannot open the page | Check `HOST = 0.0.0.0`, that you use the address printed at start, and that the OS firewall allows the `PORT` (Windows: inbound rule for TCP 5100). |
+| `CUDA error: operation not permitted when stream is capturing` | Two cameras used the GPU at once. Fixed by the GPU lock (update to this version and restart the service). |
 | Model does not load / Start says "Could not load model" | Settings > Model: press **Test model** (exact error + hint) and **Check environment**. Typical causes: the venv cannot see the system CUDA torch / TensorRT (`--system-site-packages`), a `.engine` built on another device, a Git LFS pointer or truncated file instead of the real model, an older Ultralytics than the one that trained the model. |
 | No models in the dropdown | `MODELS_DIR` does not exist for the user running the service, or has no `*.pt` files. Settings > Model shows the resolved folder and whether it was found (`GET /api/paths`). |
 | Snapshot / Test says `Cannot reach host:port (timed out)` | The camera is offline, the port is wrong, or it is blocked. The tool checks the TCP port first so this fails in ~4 s instead of hanging. |
@@ -202,6 +208,24 @@ packages. Install so that pip does not hide them (see `requirements-jetson.txt`)
 python3 -m venv --system-site-packages venv && source venv/bin/activate
 pip install --no-deps ultralytics && pip install -r requirements-jetson.txt
 ```
+
+### Hardware video decoding (GStreamer) and multiple cameras on a Jetson
+
+- **RTSP decoding**: with `STREAM_BACKEND = auto` (default) the tool decodes RTSP with GStreamer's NVIDIA hardware decoder
+  (`rtspsrc ! rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv ! appsink`) when OpenCV has GStreamer, and **falls back to
+  FFmpeg (CPU)** if the pipeline does not open. The camera card shows which one is in use (`gstreamer` / `ffmpeg`).
+  Passwords with characters like `@` are percent-encoded for GStreamer automatically. Settings > Advanced: decoder, codec
+  (H.264 / H.265 / Auto), latency; `config.ini [Camera]`: also `GST_PROTOCOLS` and `GST_DECODER`.
+- **Getting GStreamer into OpenCV**: pip's OpenCV has no GStreamer and hides JetPack's. *Check environment* reports
+  "GStreamer no" when that happens. Use a virtualenv that does not contain pip's OpenCV - the cleanest is a **dedicated** venv
+  for this tool (`python3 -m venv --system-site-packages venv`, see `requirements-jetson.txt`). Only run
+  `pip uninstall opencv-python opencv-python-headless` in a venv that no other service uses.
+- **Several cameras share one GPU safely**: all GPU work (loading a model, inference) goes through one lock. Without it, two
+  cameras starting together failed with `CUDA error: operation not permitted when stream is capturing` (Ultralytics loads a
+  TensorRT engine with a CUDA-graph warm-up that other CUDA calls may not interrupt).
+- **TensorRT engines are device specific**: build the `.engine` on the Jetson that runs it (FP16). TensorRT warns "Using an
+  engine plan file across different models of devices is not recommended and is likely to affect performance or even cause
+  errors" when it was built elsewhere.
 
 Do not `pip install torch`, `torchvision`, `tensorrt` or `opencv-python` there. A venv created *without*
 `--system-site-packages`, or with pip's own torch/OpenCV, cannot see the GPU or TensorRT and models will not load.

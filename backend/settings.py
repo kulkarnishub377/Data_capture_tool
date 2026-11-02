@@ -8,6 +8,11 @@ from pathlib import Path
 DEFAULTS = {
     "DEBUG": ("App", True),
     "HOST": ("App", "0.0.0.0"),
+    "STREAM_BACKEND": ("Camera", "auto"),
+    "GST_CODEC": ("Camera", "h264"),
+    "GST_PROTOCOLS": ("Camera", "tcp"),
+    "GST_LATENCY_MS": ("Camera", 50),
+    "GST_DECODER": ("Camera", "nvv4l2decoder"),
     "PORT": ("App", 5100),
     "MODELS_DIR": ("Paths", "../models"),
     "OUTPUT_DIR": ("Paths", "./captures"),
@@ -28,10 +33,12 @@ DEFAULTS = {
     "DEDUP_SECONDS": ("Capture", 2),
     "MAX_HOLD_SECONDS": ("Capture", 10),
 }
-CHOICES = {"SAVE_MODE": {"frame", "crop", "both"}, "WHEN": {"first", "best"}}
+CHOICES = {"SAVE_MODE": {"frame", "crop", "both"}, "WHEN": {"first", "best"},
+           "STREAM_BACKEND": {"auto", "gstreamer", "ffmpeg"}, "GST_CODEC": {"h264", "h265", "auto"},
+           "GST_PROTOCOLS": {"tcp", "udp"}}
 RANGES = {  # key -> (min, max), inclusive
     "CONF_THRESH": (0.01, 1.0), "MIN_ROI_OVERLAP": (0.0, 1.0), "MIN_BOX": (1, 5000),
-    "PORT": (1, 65535), "DEDUP_SECONDS": (0, 120), "MAX_HOLD_SECONDS": (1, 600), "JPEG_QUALITY": (1, 100), "IMG_SIZE": (160, 2048),
+    "PORT": (1, 65535), "GST_LATENCY_MS": (0, 5000), "DEDUP_SECONDS": (0, 120), "MAX_HOLD_SECONDS": (1, 600), "JPEG_QUALITY": (1, 100), "IMG_SIZE": (160, 2048),
     "PAD_NORMAL": (0.0, 2.0), "PAD_BIKE": (0.0, 2.0),
 }
 
@@ -39,6 +46,8 @@ RANGES = {  # key -> (min, max), inclusive
 def _validate(key, value):
     if key in CHOICES and value not in CHOICES[key]:
         raise ValueError(f"{key} must be one of {sorted(CHOICES[key])}, got {value!r}")
+    if key == "GST_DECODER" and not re.fullmatch(r"[A-Za-z0-9_\-]+", str(value)):
+        raise ValueError(f"GST_DECODER must be a plain GStreamer element name, got {value!r}")
     if key in RANGES:
         lo, hi = RANGES[key]
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not lo <= value <= hi:

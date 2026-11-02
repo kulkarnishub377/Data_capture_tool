@@ -172,6 +172,7 @@
     "#adv-overlap": ["MIN_ROI_OVERLAP", parseFloat],
     "#adv-dedup": ["DEDUP_SECONDS", parseFloat],
     "#adv-maxhold": ["MAX_HOLD_SECONDS", parseFloat],
+    "#adv-gstlat": ["GST_LATENCY_MS", v => parseInt(v, 10)],
     "#adv-jpeg": ["JPEG_QUALITY", v => parseInt(v, 10)],
     "#adv-imgsz": ["IMG_SIZE", v => parseInt(v, 10)],
   };
@@ -216,6 +217,8 @@
 
     segSet("seg-mode", s.SAVE_MODE);
     segSet("seg-when", s.WHEN);
+    segSet("seg-backend", s.STREAM_BACKEND);
+    segSet("seg-codec", s.GST_CODEC);
     $("#sel-meta").checked = !!s.SAVE_METADATA; metaText();
     $("#conf-range").value = s.CONF_THRESH;
     $("#conf-num").value = s.CONF_THRESH;
@@ -248,6 +251,7 @@
         row("PyTorch", t.error ? "not available" : `${t.version}, CUDA ${t.cuda ? "yes" + (t.gpu ? " (" + t.gpu + ")" : "") : "NO"}`, !!t.error || !t.cuda),
         row("TensorRT", rt.error ? "not available" : rt.version, !!rt.error && arm),
         row("OpenCV", cv.error ? "not available" : `${cv.version}, GStreamer ${cv.gstreamer ? "yes" : "no"}, FFmpeg ${cv.ffmpeg ? "yes" : "no"}`, !!cv.error || !cv.ffmpeg),
+        row("Hardware decoder", f.nvdec === true ? "nvv4l2decoder available" : f.nvdec === false ? "nvv4l2decoder NOT found" : "unknown (gst-inspect-1.0 not installed)", f.nvdec === false && arm),
         row("Ultralytics", f.ultralytics || "not installed", !f.ultralytics),
         row("Tracker (lap)", f.lap ? "yes" : "missing", !f.lap),
       ];

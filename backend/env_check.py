@@ -6,6 +6,8 @@ then fail to load. build_warnings() turns the facts into plain instructions."""
 import importlib.util
 import platform
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -23,13 +25,27 @@ def _system_site_packages() -> bool:
     return False
 
 
+def _nvdec():
+    """Is GStreamer's NVIDIA hardware decoder plugin installed? None if gst-inspect-1.0 itself is missing."""
+    exe = shutil.which("gst-inspect-1.0")
+    if not exe:
+        return None
+    try:
+        return subprocess.run([exe, "nvv4l2decoder"], capture_output=True, timeout=10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def collect() -> dict:
     f = {"python": sys.executable, "version": platform.python_version(), "machine": platform.machine(),
          "in_venv": sys.prefix != getattr(sys, "base_prefix", sys.prefix), "system_site_packages": _system_site_packages()}
     try:
         import torch
-        f["torch"] = {"version": torch.__version__, "cuda": bool(torch.cuda.is_available()),
-                      "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None}
+
+        import gpu_lock
+        with gpu_lock.guard("cuda"):
+            f["torch"] = {"version": torch.__version__, "cuda": bool(torch.cuda.is_available()),
+                          "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None}
     except Exception as e:  # noqa: BLE001
         f["torch"] = {"error": str(e)}
     try:
@@ -52,6 +68,7 @@ def collect() -> dict:
         f["ultralytics"] = None
         f["ultralytics_error"] = str(e)
     f["lap"] = importlib.util.find_spec("lap") is not None
+    f["nvdec"] = _nvdec()
     f["warnings"] = build_warnings(f)
     return f
 
@@ -78,8 +95,14 @@ def build_warnings(f: dict) -> list:
                  "package. " + venv_fix)
     if "error" not in cv:
         if jetson and not cv.get("gstreamer"):
-            w.append("This OpenCV was built without GStreamer (probably the pip build hiding JetPack's). "
-                     "Run: pip uninstall opencv-python opencv-python-headless opencv-contrib-python")
+            w.append("This OpenCV was built without GStreamer, so RTSP streams are decoded on the CPU with FFmpeg (it works, "
+                     "but uses far more CPU than the Jetson's hardware decoder). Usually this is pip's OpenCV hiding JetPack's "
+                     "GStreamer build. Use a virtualenv that does not contain pip's OpenCV (create a dedicated one with "
+                     "--system-site-packages), or run: pip uninstall opencv-python opencv-python-headless opencv-contrib-python "
+                     "- but not in a virtualenv that other services share.")
+        elif jetson and cv.get("gstreamer") and f.get("nvdec") is False:
+            w.append("GStreamer is available but its hardware decoder plugin nvv4l2decoder is not (gst-inspect-1.0 nvv4l2decoder "
+                     "fails): RTSP falls back to FFmpeg on the CPU.")
         if not cv.get("ffmpeg"):
             w.append("This OpenCV has no FFmpeg backend: RTSP streams cannot be opened with it.")
     if f.get("ultralytics") is None:

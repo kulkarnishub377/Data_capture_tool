@@ -28,6 +28,8 @@ real `config.ini` or `data/cameras.json` (it holds a real camera URL with a pass
 - **`settings.save` edits lines in place** (comments survive). Add new keys to `DEFAULTS` (+ `CHOICES`/`RANGES`)
   and to `WORKER_KEYS` in `app.py` if a running worker must restart when it changes.
 - **ROI data model** is `rois` (list of polygons). `roi.py` functions accept one polygon or a list.
+- **GPU access goes through `gpu_lock.guard(device)`** (loading a model, `track`/`predict`, any `torch.cuda` call). Never call the GPU
+  from a worker thread without it: two cameras then break each other's CUDA graph capture. `half` is only sent for `.pt` on CUDA.
 - **Model loading failures must explain themselves**: go through `model_diag` (`ModelFileError`, `explain_model_error`) and surface the text in
   the UI (Settings > Test model / Check environment). The deployment target is a Jetson whose setup you cannot see - never assume it.
 - **Never expose camera passwords**: API responses go through `public()` / `storage.mask_url`.

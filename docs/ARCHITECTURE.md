@@ -29,7 +29,8 @@ Browser (frontend/)  <--HTTP/JSON, MJPEG-->  Flask app (backend/app.py)
 | `model_diag.py` | `model_file_problem` (missing / empty / Git LFS pointer / truncated), `explain_model_error` (adds a plain-language hint to load errors), `MODEL_EXTS`. |
 | `env_check.py` | `collect()` (torch/CUDA, TensorRT, OpenCV backends, ultralytics, lap) and `build_warnings()` (pure: turns the facts into fixes, e.g. a Jetson venv without `--system-site-packages`). |
 | `torch_compat.py` | `apply()`: restores `torch.load(weights_only=False)` for our own trusted checkpoints (PyTorch >= 2.6); called before ultralytics is imported. |
-| `camera_io.py` | `CameraError`, `check_port`, `run_with_timeout`, `open_capture` (5 s open/read timeouts), `grab_frame`. |
+| `camera_io.py` | `CameraError`, `check_port`, `run_with_timeout`; `open_stream` -> `OpenResult(cap, backend, note)`: RTSP via a GStreamer pipeline (`build_gst_pipeline`, `sanitize_rtsp_url`; hardware decode on a Jetson) with FFmpeg fallback, files/non-RTSP via FFmpeg; `grab_frame`. |
+| `gpu_lock.py` | `guard(device)`: ONE process-wide lock for every GPU call (model load, inference, torch.cuda probes); a no-op for `cpu`. Required because a TensorRT engine load captures a CUDA graph. |
 
 ## Capture logic (`capture_logic.CaptureLogic.process`)
 

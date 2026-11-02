@@ -261,6 +261,33 @@
               <small>If the tracker loses a vehicle and gives it a new ID, a track that appears where the vehicle was expected within this time is treated as the SAME vehicle (not saved twice). Keep it small so the next car in the lane is still captured.</small></div>
             <div class="sctl"><div class="unit"><input type="number" id="adv-dedup" min="0" max="120" step="0.5"><span>sec</span></div></div>
           </div>
+          <div class="srow" data-keys="STREAM_BACKEND">
+            <div class="slabel"><label id="lbl-backend">Video decoder (RTSP)</label>
+              <small><b>Auto</b> uses GStreamer hardware decoding (NVIDIA Jetson) when OpenCV supports it and falls back to FFmpeg (CPU) if the pipeline cannot open. Check environment shows whether GStreamer is available.</small></div>
+            <div class="sctl">
+              <div class="seg" id="seg-backend" data-key="STREAM_BACKEND" role="radiogroup" aria-labelledby="lbl-backend">
+                <button type="button" role="radio" data-value="auto">Auto</button>
+                <button type="button" role="radio" data-value="gstreamer">GStreamer</button>
+                <button type="button" role="radio" data-value="ffmpeg">FFmpeg</button>
+              </div>
+            </div>
+          </div>
+          <div class="srow" data-keys="GST_CODEC">
+            <div class="slabel"><label id="lbl-codec">Camera video codec</label>
+              <small>Used by the GStreamer pipeline. H.264 is the common case; Auto lets GStreamer detect it (H.264 or H.265).</small></div>
+            <div class="sctl">
+              <div class="seg" id="seg-codec" data-key="GST_CODEC" role="radiogroup" aria-labelledby="lbl-codec">
+                <button type="button" role="radio" data-value="h264">H.264</button>
+                <button type="button" role="radio" data-value="h265">H.265</button>
+                <button type="button" role="radio" data-value="auto">Auto</button>
+              </div>
+            </div>
+          </div>
+          <div class="srow" data-keys="GST_LATENCY_MS">
+            <div class="slabel"><label for="adv-gstlat">RTSP latency</label>
+              <small>GStreamer jitter buffer. Lower is more real-time; raise it (e.g. 200) on a flaky network.</small></div>
+            <div class="sctl"><div class="unit"><input type="number" id="adv-gstlat" min="0" max="5000" step="10"><span>ms</span></div></div>
+          </div>
           <div class="srow" data-keys="MAX_HOLD_SECONDS">
             <div class="slabel"><label for="adv-maxhold">Maximum wait</label>
               <small>A vehicle that stays inside the ROI (stopped, or in traffic) is saved after this long, using its best frame so far.</small></div>

@@ -14,13 +14,15 @@ def detect() -> list:
 def _probe() -> list:
     try:
         import torch
-        if not torch.cuda.is_available():
-            return []
-        out = []
-        for i in range(torch.cuda.device_count()):
-            p = torch.cuda.get_device_properties(i)
-            out.append({"id": f"cuda:{i}", "name": p.name, "memory_mb": p.total_memory // (1024 * 1024)})
-        return out
+        import gpu_lock
+        with gpu_lock.guard("cuda"):
+            if not torch.cuda.is_available():
+                return []
+            out = []
+            for i in range(torch.cuda.device_count()):
+                p = torch.cuda.get_device_properties(i)
+                out.append({"id": f"cuda:{i}", "name": p.name, "memory_mb": p.total_memory // (1024 * 1024)})
+            return out
     except Exception:
         return []
 

@@ -21,7 +21,7 @@ Camera objects returned by the API have the RTSP password replaced by `****`.
 | `PUT /api/settings` | partial update. Validates choices/ranges (400 on error). If any worker-relevant key actually changed, running cameras restart once (counters kept). `MODEL` must exist in `MODELS_DIR`. |
 | `GET /api/models` | sorted model files in `MODELS_DIR`: `*.pt`, `*.engine` (TensorRT), `*.onnx` |
 | `POST /api/model/test?model=` | loads the model and runs one blank test frame on the configured device. Always 200: `{ok:true, model, device, classes, seconds, message}` or `{ok:false, model, device?, error}` where `error` has a plain-language hint |
-| `GET /api/environment` | what this Python can use: `{python, version, machine, in_venv, system_site_packages, torch:{version,cuda,gpu}, tensorrt, opencv:{version,gstreamer,ffmpeg}, ultralytics, lap, warnings:[...]}` |
+| `GET /api/environment` | what this Python can use: `{python, version, machine, in_venv, system_site_packages, torch:{version,cuda,gpu}, tensorrt, opencv:{version,gstreamer,ffmpeg}, nvdec, ultralytics, lap, warnings:[...]}` |
 | `GET /api/paths` | `{models_dir, models_dir_exists, models_count, output_dir}`: the resolved folders (`~`, env vars and relative paths expanded) |
 | `GET /api/model/classes?model=` | `{names, selected, default, warnings}`; `selected` honours `CLASSES`, unknown names go to `warnings` |
 | `GET /api/devices` | `{gpus:[{id,name,memory_mb}], pool, warnings}` |
@@ -33,7 +33,7 @@ Camera objects returned by the API have the RTSP password replaced by `****`.
 | `POST /api/capture/<id>/stop` | `{ok}` |
 | `POST /api/capture/start-all` | Starts every **enabled** camera. `{started, failed, skipped, already_running, results:{<id>:{name, ok\|error\|skipped\|already_running}}}`. A camera that cannot start (no ROI, model missing) is reported, never fatal. |
 | `POST /api/capture/stop-all` | Stops all running cameras in parallel. `{stopped: n}` |
-| `GET /api/capture/status` | `{<id>: {state, message, saved, skipped, device}}`. `state`: `connected`, `reconnecting`, `restarting`, `stopping`, `stopped`, `error`. Counters include previous workers of the same camera. |
+| `GET /api/capture/status` | `{<id>: {state, message, saved, skipped, device, backend}}` (`backend`: `gstreamer` / `ffmpeg` / `file` once a stream is open). `state`: `connected`, `reconnecting`, `restarting`, `stopping`, `stopped`, `error`. Counters include previous workers of the same camera. |
 | `GET /api/stream/<id>` | MJPEG (`multipart/x-mixed-replace`) live preview with ROI + boxes; 404 if never started; survives restarts |
 
 ## Captured images

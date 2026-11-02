@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 
 import camera_io
+import gpu_lock
 import model_diag
 import roi
 import storage
@@ -43,11 +44,14 @@ class YoloDetector:
     def __init__(self, model_path, device, half, conf, imgsz, class_names, polys, frame_size):
         torch_compat.apply()
         from ultralytics import YOLO
-        self.model = YOLO(str(model_path), task="detect")
         self.device = device
-        self.half = bool(half and device.startswith("cuda"))
+        # half only for PyTorch weights on CUDA: a TensorRT/ONNX file has its precision built in, and newer
+        # Ultralytics deprecates the argument (it warned on every frame)
+        self.half = bool(half and device.startswith("cuda") and Path(str(model_path)).suffix.lower() == ".pt")
         self.conf, self.imgsz = conf, imgsz
-        self.names = dict(self.model.names)
+        with gpu_lock.guard(device):                    # loading a TensorRT engine captures a CUDA graph
+            self.model = YOLO(str(model_path), task="detect")
+            self.names = dict(self.model.names)
         self.class_ids = [i for i, n in self.names.items() if n in set(class_names)]
         self.bbox = roi.expand_bbox(polys, frame_size, DETECT_MARGIN)
 
@@ -56,9 +60,11 @@ class YoloDetector:
         crop = frame[y1:y2, x1:x2]
         if crop.size == 0 or not self.class_ids:
             return []
-        res = self.model.track(crop, persist=True, tracker=TRACKER_CFG, conf=self.conf,
-                               imgsz=self.imgsz, device=self.device, half=self.half,
-                               classes=self.class_ids, agnostic_nms=True, verbose=False)[0]
+        kwargs = {"half": True} if self.half else {}
+        with gpu_lock.guard(self.device):
+            res = self.model.track(crop, persist=True, tracker=TRACKER_CFG, conf=self.conf,
+                                   imgsz=self.imgsz, device=self.device, classes=self.class_ids,
+                                   agnostic_nms=True, verbose=False, **kwargs)[0]
         boxes = res.boxes
         if boxes is None or boxes.id is None:
             return []
@@ -73,17 +79,20 @@ class YoloDetector:
 def load_model_names(model_path) -> dict:
     torch_compat.apply()
     from ultralytics import YOLO
-    return dict(YOLO(str(model_path), task="detect").names)
+    with gpu_lock.guard("cuda"):                        # a .engine file builds a TensorRT context just to read names
+        return dict(YOLO(str(model_path), task="detect").names)
 
 
 def probe_model(model_path, device, half, imgsz) -> dict:
     """Load the model and run ONE blank frame on `device`: finds CUDA / TensorRT problems before capture starts."""
     torch_compat.apply()
     from ultralytics import YOLO
-    model = YOLO(str(model_path), task="detect")
-    model.predict(np.zeros((imgsz, imgsz, 3), np.uint8), device=device, imgsz=imgsz,
-                  half=bool(half and device.startswith("cuda")), verbose=False)
-    return dict(model.names)
+    use_half = bool(half and device.startswith("cuda") and Path(str(model_path)).suffix.lower() == ".pt")
+    kwargs = {"half": True} if use_half else {}
+    with gpu_lock.guard(device):
+        model = YOLO(str(model_path), task="detect")
+        model.predict(np.zeros((imgsz, imgsz, 3), np.uint8), device=device, imgsz=imgsz, verbose=False, **kwargs)
+        return dict(model.names)
 
 
 class LatestFrameReader:
@@ -156,6 +165,7 @@ class CameraWorker:
         self._lock = threading.Lock()
         self._state, self._message = "stopped", ""
         self._saved = 0
+        self._backend = None            # "gstreamer" | "ffmpeg" | "file" once a stream is open
         self._logic = None
         self._jpeg = None
         self._is_file = Path(str(self.source)).is_file()
@@ -183,7 +193,7 @@ class CameraWorker:
         with self._lock:
             return {"state": self._state, "message": self._message, "saved": self._saved,
                     "skipped": self._logic.skipped if self._logic else 0,
-                    "device": self.device}
+                    "device": self.device, "backend": self._backend}
 
     def latest_jpeg(self):
         with self._lock:
@@ -211,14 +221,19 @@ class CameraWorker:
         try:
             while not self._stop.is_set():
                 problem = None if self._is_file else self._unreachable()
-                cap = None if problem else camera_io.open_capture(self.source, self._is_file)
+                opened = None if problem else camera_io.open_stream(self.source, self._is_file,
+                                                                    opts=camera_io.stream_opts(self.cfg))
+                cap = opened.cap if opened else None
                 if cap is None:
-                    self._set("reconnecting", problem or "cannot open stream")
+                    note = opened.note if opened and opened.note else "cannot open stream"
+                    self._set("reconnecting", problem or note)
                     if self._stop.wait(backoff):
                         break
                     backoff = min(backoff * 2, 15)
                     continue
                 backoff = 1.0
+                self._backend = opened.backend
+                log.info("[%s] stream opened with %s", self.camera["name"], opened.backend)
                 ended = self._loop(cap)
                 cap.release()
                 if ended and self._is_file:

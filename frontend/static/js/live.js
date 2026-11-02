@@ -63,7 +63,7 @@
     const running = state !== "stopped" && state !== "error";
     c.chip.textContent = state + (st && st.message && state !== "connected" ? ` - ${st.message}` : "");
     c.chip.className = "chip " + state;
-    c.count.textContent = st ? `saved ${st.saved} | skipped ${st.skipped} | ${st.device}` : "";
+    c.count.textContent = st ? `saved ${st.saved} | skipped ${st.skipped} | ${st.device}${st.backend ? " | " + st.backend : ""}` : "";
     c.btn.replaceChildren(h("i", { class: running ? "fa-solid fa-stop" : "fa-solid fa-play" }), running ? " Stop" : " Start");
     c.btn.className = running ? "danger" : "primary";
     if (running && !c.running) {
