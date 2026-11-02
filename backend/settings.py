@@ -16,18 +16,19 @@ DEFAULTS = {
     "CLASSES": ("Model", []),
     "SAVE_MODE": ("Capture", "frame"),
     "SAVE_METADATA": ("Capture", False),
-    "WHEN": ("Capture", "first"),
+    "WHEN": ("Capture", "best"),
     "MIN_BOX": ("Capture", 40),
     "MIN_ROI_OVERLAP": ("Capture", 0.5),
     "JPEG_QUALITY": ("Capture", 95),
     "PAD_NORMAL": ("Capture", 0.15),
     "PAD_BIKE": ("Capture", 0.40),
     "DEDUP_SECONDS": ("Capture", 2),
+    "MAX_HOLD_SECONDS": ("Capture", 10),
 }
 CHOICES = {"SAVE_MODE": {"frame", "crop", "both"}, "WHEN": {"first", "best"}}
 RANGES = {  # key -> (min, max), inclusive
     "CONF_THRESH": (0.01, 1.0), "MIN_ROI_OVERLAP": (0.0, 1.0), "MIN_BOX": (1, 5000),
-    "DEDUP_SECONDS": (0, 120), "JPEG_QUALITY": (1, 100), "IMG_SIZE": (160, 2048),
+    "DEDUP_SECONDS": (0, 120), "MAX_HOLD_SECONDS": (1, 600), "JPEG_QUALITY": (1, 100), "IMG_SIZE": (160, 2048),
     "PAD_NORMAL": (0.0, 2.0), "PAD_BIKE": (0.0, 2.0),
 }
 

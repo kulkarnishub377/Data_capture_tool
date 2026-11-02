@@ -15,24 +15,16 @@ import cv2
 import numpy as np
 
 import camera_io
-import dedup
 import roi
 import storage
+from capture_logic import CaptureLogic, Detection  # noqa: F401  (re-exported)
 
 log = logging.getLogger("capture")
 
 COCO_VEHICLES = ["car", "motorcycle", "bus", "truck"]
-LOST_FRAMES = 10        # 'best' mode: finalize a track unseen for this many frames
 DETECT_MARGIN = 0.3     # detect on the ROI bounding box grown by this fraction, so a vehicle
                         # half outside the ROI is seen whole (not as a clipped slice)
-
-
-@dataclass
-class Detection:
-    track_id: int
-    cls: str
-    conf: float
-    box: tuple  # x1, y1, x2, y2 in full-frame pixels
+TRACKER_CFG = str(Path(__file__).resolve().parent / "trackers" / "bytetrack_vehicle.yaml")
 
 
 def default_classes(names: dict) -> list:
@@ -41,95 +33,6 @@ def default_classes(names: dict) -> list:
     if "person" in vals and all(c in vals for c in COCO_VEHICLES):
         return list(COCO_VEHICLES)
     return vals
-
-
-class CaptureLogic:
-    """Decides, frame by frame, which detections become saved captures."""
-
-    def __init__(self, cfg, polys, frame_size, classes):
-        self.cfg = cfg
-        self.polys = roi.as_polygons(polys)
-        self.size = tuple(frame_size)
-        self.mask = roi.make_mask(self.polys, self.size)   # built once, not per detection
-        self.classes = set(classes)
-        self.dedup = dedup.Deduper(seconds=cfg["DEDUP_SECONDS"])
-        self._cand = {}  # best mode: track_id -> candidate dict
-        self._frame_no = 0
-
-    @property
-    def skipped(self):
-        return self.dedup.skipped
-
-    def eligible(self, d: Detection) -> bool:
-        c = self.cfg
-        x1, y1, x2, y2 = d.box
-        if d.cls not in self.classes or d.conf < c["CONF_THRESH"]:
-            return False
-        if min(x2 - x1, y2 - y1) < c["MIN_BOX"]:
-            return False
-        centre = ((x1 + x2) / 2, (y1 + y2) / 2)
-        if not any(roi.point_in_polygon(centre, pg) for pg in self.polys):
-            return False
-        return roi.box_overlap_ratio(d.box, self.polys, self.size, mask=self.mask) >= c["MIN_ROI_OVERLAP"]
-
-    def _emit(self, track_id, cls, conf, box, frame, now, ts):
-        """Lock the track, dedup on the vehicle crop; return a capture request or None."""
-        self.dedup.lock(track_id)
-        crop = storage._crop(frame, box, self.cfg["PAD_NORMAL"])
-        if crop.size == 0:
-            return None
-        if self.dedup.is_duplicate(box, crop, now):
-            return None
-        self.dedup.record(box, crop, now, track_id=track_id)
-        return {"track_id": track_id, "cls": cls, "conf": conf, "box": tuple(box),
-                "frame": frame, "ts": ts}
-
-    def process(self, frame, dets, now, ts) -> list:
-        self._frame_no += 1
-        out, ok_ids, present = [], set(), set()
-        best = self.cfg["WHEN"] == "best"
-        for d in dets:
-            present.add(d.track_id)
-            if self.dedup.locked(d.track_id):
-                self.dedup.touch(d.track_id, d.box, now)  # saved vehicle still in view
-                continue
-            if not self.eligible(d):
-                continue
-            if not best:
-                r = self._emit(d.track_id, d.cls, d.conf, d.box, frame, now, ts)
-                if r:
-                    out.append(r)
-                continue
-            ok_ids.add(d.track_id)
-            score = d.conf * (d.box[2] - d.box[0]) * (d.box[3] - d.box[1])
-            cur = self._cand.get(d.track_id)
-            if cur is None or score > cur["score"]:
-                self._cand[d.track_id] = {"score": score, "cls": d.cls, "conf": d.conf, "box": d.box,
-                                          "frame": frame.copy(), "ts": ts, "seen": self._frame_no}
-            else:
-                cur["seen"] = self._frame_no
-        if best:
-            for tid in list(self._cand):
-                if tid in ok_ids:
-                    continue
-                c = self._cand[tid]
-                left_roi = tid in present                              # seen, but no longer eligible
-                lost = self._frame_no - c["seen"] > LOST_FRAMES        # not seen for a while
-                if left_roi or lost:
-                    del self._cand[tid]
-                    r = self._emit(tid, c["cls"], c["conf"], c["box"], c["frame"], now, c["ts"])
-                    if r:
-                        out.append(r)
-        return out
-
-    def flush(self, now) -> list:
-        out = []
-        for tid, c in list(self._cand.items()):
-            r = self._emit(tid, c["cls"], c["conf"], c["box"], c["frame"], now, c["ts"])
-            if r:
-                out.append(r)
-        self._cand.clear()
-        return out
 
 
 class YoloDetector:
@@ -150,9 +53,9 @@ class YoloDetector:
         crop = frame[y1:y2, x1:x2]
         if crop.size == 0 or not self.class_ids:
             return []
-        res = self.model.track(crop, persist=True, tracker="bytetrack.yaml", conf=self.conf,
+        res = self.model.track(crop, persist=True, tracker=TRACKER_CFG, conf=self.conf,
                                imgsz=self.imgsz, device=self.device, half=self.half,
-                               classes=self.class_ids, verbose=False)[0]
+                               classes=self.class_ids, agnostic_nms=True, verbose=False)[0]
         boxes = res.boxes
         if boxes is None or boxes.id is None:
             return []

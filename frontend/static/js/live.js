@@ -106,7 +106,7 @@
 
   async function pollRecent() {
     let r;
-    try { r = await api("/recent?limit=20"); } catch (e) { return; }
+    try { r = await api("/recent?limit=10"); } catch (e) { return; }
     const list = $("#recent-list");
     const keep = new Set(r.items.map(i => i.path));
     for (const [path, el] of recentEls) if (!keep.has(path)) { el.remove(); recentEls.delete(path); }

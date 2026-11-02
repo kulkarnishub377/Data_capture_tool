@@ -1,0 +1,9 @@
+# ByteTrack settings tuned for vehicles on a camera that may be processed at a LOW frame rate.
+# (ultralytics defaults: track_buffer 30, match_thresh 0.8)
+tracker_type: bytetrack
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.3      # a bit stricter than 0.25: fewer phantom tracks from weak detections
+track_buffer: 60           # keep a lost track alive longer so it can be re-matched instead of getting a new id
+match_thresh: 0.85         # more tolerant matching when a vehicle moved far between two frames
+fuse_score: True

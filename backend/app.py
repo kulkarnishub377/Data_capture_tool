@@ -43,7 +43,7 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
     failed = {}        # cid -> why an automatic restart could not bring the camera back
     WORKER_KEYS = {"MODEL", "DEVICE", "HALF", "CONF_THRESH", "IMG_SIZE", "CLASSES", "SAVE_MODE",
                    "SAVE_METADATA", "WHEN", "MIN_BOX", "MIN_ROI_OVERLAP", "JPEG_QUALITY",
-                   "PAD_NORMAL", "PAD_BIKE", "DEDUP_SECONDS"}
+                   "PAD_NORMAL", "PAD_BIKE", "DEDUP_SECONDS", "MAX_HOLD_SECONDS"}
 
     def err(msg, code=400):
         return jsonify({"error": msg}), code
@@ -393,7 +393,7 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
     @app.get("/api/recent")
     def recent():
         try:
-            limit = min(100, max(1, int(request.args.get("limit", 24))))
+            limit = min(100, max(1, int(request.args.get("limit", 10))))
         except ValueError:
             return err("limit must be a number")
         return jsonify({"items": storage.recent_captures(cfg()["OUTPUT_DIR"], limit)})

@@ -7,7 +7,7 @@ def test_load_fills_defaults(tmp_path):
     assert cfg["SAVE_MODE"] == "frame"
     assert cfg["SAVE_METADATA"] is False
     assert cfg["CONF_THRESH"] == 0.25
-    assert cfg["WHEN"] == "first"
+    assert cfg["WHEN"] == "best"
     assert cfg["DEVICE"] == "auto"
     assert cfg["CLASSES"] == []
 
@@ -76,3 +76,11 @@ def test_out_of_range_value_in_file_falls_back_to_default(tmp_path):
     p = tmp_path / "c.ini"
     p.write_text("[Model]\nCONF_THRESH = 7\n", encoding="utf-8")
     assert settings.load(p)["CONF_THRESH"] == 0.25
+
+
+def test_max_hold_default_and_range(tmp_path):
+    assert settings.load(tmp_path / "none.ini")["MAX_HOLD_SECONDS"] == 10
+    with pytest.raises(ValueError):
+        settings.save(tmp_path / "c.ini", {"MAX_HOLD_SECONDS": 0})
+    settings.save(tmp_path / "c.ini", {"MAX_HOLD_SECONDS": 30})
+    assert settings.load(tmp_path / "c.ini")["MAX_HOLD_SECONDS"] == 30
