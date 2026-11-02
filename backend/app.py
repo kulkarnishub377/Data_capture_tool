@@ -288,6 +288,38 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
             w.stop()
         return jsonify({"ok": True})
 
+    @app.post("/api/capture/start-all")
+    def capture_start_all():
+        """Start every enabled camera. Cameras that cannot start (no ROI, bad model...) are reported, not fatal."""
+        results = {}
+        counts = {"started": 0, "failed": 0, "skipped": 0, "already_running": 0}
+        for cam in store.list():
+            cid = cam["id"]
+            if cam.get("enabled") is False:
+                results[cid] = {"skipped": "disabled", "name": cam["name"]}
+                counts["skipped"] += 1
+                continue
+            payload, code = start_worker(cid)
+            results[cid] = dict(payload, name=cam["name"])
+            if code != 200:
+                counts["failed"] += 1
+            elif payload.get("already_running"):
+                counts["already_running"] += 1
+            else:
+                counts["started"] += 1
+        return jsonify(dict(counts, results=results))
+
+    @app.post("/api/capture/stop-all")
+    def capture_stop_all():
+        with wlock:
+            running = [w for w in workers.values() if w.status()["state"] not in ("stopped", "error")]
+        threads = [threading.Thread(target=w.stop, daemon=True) for w in running]  # stop in parallel
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=15)
+        return jsonify({"stopped": len(running)})
+
     @app.get("/api/capture/status")
     def capture_status():
         with wlock:

@@ -1,0 +1,33 @@
+# Data Capture Tool
+
+> Local Flask + plain-JS app that captures one clean training image per vehicle from live RTSP camera streams,
+> only while the vehicle is inside user-drawn ROI polygons. Any YOLO model (custom or COCO), multi-GPU, no
+> database (JSON + image files). Browser UI: Live view with recent captures, ROI editor, cameras, gallery, settings.
+
+Key facts for tools and agents:
+- Run: `python backend/app.py` (port 5100). Tests: `python -m pytest` (integration needs ../vedio and ../models).
+- State: `config.ini` (settings), `data/cameras.json` (cameras + `rois`), `captures/<cam>/<date>/frame|crop/*.jpg`.
+- Backend in `backend/`, frontend in `frontend/`. No build step, no database.
+- Duplicate protection: track lock + ID-switch guard (IoU/pHash against recently active saves only).
+- Settings apply only when the user presses "Save & restart" (one restart, counters + images kept).
+
+## Docs
+- [README](README.md): install, usage, every setting, troubleshooting
+- [Architecture](docs/ARCHITECTURE.md): modules, capture logic, restart flow, data formats, threading
+- [HTTP API](docs/API.md): every endpoint with request/response shapes
+- [AGENTS.md](AGENTS.md): conventions, test commands, gotchas for AI coding assistants
+
+## Code map
+- [backend/app.py](backend/app.py): Flask app factory, REST API, MJPEG stream, restart-on-settings-change
+- [backend/capture_engine.py](backend/capture_engine.py): CaptureLogic, YoloDetector, LatestFrameReader, CameraWorker
+- [backend/dedup.py](backend/dedup.py): duplicate suppression
+- [backend/roi.py](backend/roi.py): polygon / mask helpers (multi-ROI)
+- [backend/storage.py](backend/storage.py): cameras.json store, image saving, gallery, recent, thumbnails
+- [backend/settings.py](backend/settings.py): config.ini load/save with validation
+- [backend/devices.py](backend/devices.py): GPU detection and camera-to-device assignment
+- [backend/camera_io.py](backend/camera_io.py): safe camera access (port check, timeouts)
+- [frontend/index.html](frontend/index.html): single page; scripts in frontend/static/js/
+- [backend/tests/](backend/tests/): pytest suite (unit, API with fake worker, real-model integration)
+
+## Optional
+- [llms-full.txt](llms-full.txt): README + architecture + API + AGENTS in one file

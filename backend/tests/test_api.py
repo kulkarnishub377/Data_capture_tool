@@ -321,3 +321,42 @@ def test_status_reports_restarting_state_during_restart(env):
     FakeWorker.instances[0].stop = lambda: _time.sleep(0.4)   # slow shutdown keeps the restart in flight
     c.put("/api/settings", json={"CONF_THRESH": 0.7})
     assert _wait(lambda: c.get("/api/capture/status").get_json()[cam["id"]]["state"] == "restarting")
+
+
+def _three_cameras(c):
+    a = _ready_cam(c)                                              # has an ROI
+    b = _cam(c, name="NoRoi")                                      # no ROI yet
+    d = _ready_cam(c)
+    c.put(f"/api/cameras/{d['id']}", json={"enabled": False})      # disabled
+    return a, b, d
+
+
+def test_start_all_starts_ready_cameras_and_reports_the_rest(env):
+    c, _ = env
+    a, b, d = _three_cameras(c)
+    r = c.post("/api/capture/start-all").get_json()
+    assert r["started"] == 1 and r["failed"] == 1 and r["skipped"] == 1
+    assert r["results"][a["id"]]["ok"] is True
+    assert "ROI" in r["results"][b["id"]]["error"]
+    assert r["results"][d["id"]]["skipped"] == "disabled"
+    assert len(FakeWorker.instances) == 1 and FakeWorker.instances[0].running is True
+
+
+def test_start_all_twice_does_not_start_a_second_worker(env):
+    c, _ = env
+    _ready_cam(c)
+    c.post("/api/capture/start-all")
+    r = c.post("/api/capture/start-all").get_json()
+    assert r["already_running"] == 1 and r["started"] == 0
+    assert len(FakeWorker.instances) == 1
+
+
+def test_stop_all_stops_every_running_camera(env):
+    c, _ = env
+    _ready_cam(c)
+    _ready_cam(c)
+    c.post("/api/capture/start-all")
+    assert all(w.running for w in FakeWorker.instances) and len(FakeWorker.instances) == 2
+    r = c.post("/api/capture/stop-all").get_json()
+    assert r["stopped"] == 2 and not any(w.running for w in FakeWorker.instances)
+    assert c.post("/api/capture/stop-all").get_json()["stopped"] == 0
