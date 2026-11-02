@@ -39,7 +39,7 @@ Camera objects returned by the API have the RTSP password replaced by `****`.
 | `GET /api/captures?camera=&date=&class=&page=&per_page=` | `{total,page,per_page,items:[{path,camera,date,kind,class,name,ts}]}`, newest first (`per_page` <= 200) |
 | `GET /api/captures/<path>` | the JPEG. `path` is `items[].path`. |
 | `DELETE /api/captures/<path>` | deletes the image and its `.json` |
-| `GET /api/recent?limit=24` | `{items:[...]}` newest across cameras, one per vehicle (crop preferred). Fast (reads newest date folders only). |
+| `GET /api/recent?limit=10` | `{items:[...]}` newest across cameras, one per vehicle (crop preferred); default and UI use the latest 10 (max 100). Fast (reads newest date folders only). |
 | `GET /api/thumb/<path>?w=320` | cached JPEG thumbnail (`w` 32 - 1280), `Cache-Control: max-age=3600` |
 
 `ts` is local time `YYYY-MM-DD HH:MM:SS`. Invalid / escaping paths return 400 or 404.

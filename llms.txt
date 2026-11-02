@@ -8,7 +8,7 @@ Key facts for tools and agents:
 - Run: `python backend/app.py` (port 5100). Tests: `python -m pytest` (integration needs ../vedio and ../models).
 - State: `config.ini` (settings), `data/cameras.json` (cameras + `rois`), `captures/<cam>/<date>/frame|crop/*.jpg`.
 - Backend in `backend/`, frontend in `frontend/`. No build step, no database.
-- Duplicate protection: track lock + ID-switch guard (IoU/pHash against recently active saves only).
+- One capture per vehicle: tracker-ID switches are re-linked by motion prediction; the best frame is buffered (a better one replaces the older) and saved once when the vehicle leaves the ROI.
 - Settings apply only when the user presses "Save & restart" (one restart, counters + images kept).
 - Live tab: Start all / Stop all, cameras-per-row layout, per-camera full screen, recent-captures panel.
 
@@ -20,8 +20,9 @@ Key facts for tools and agents:
 
 ## Code map
 - [backend/app.py](backend/app.py): Flask app factory, REST API, MJPEG stream, restart-on-settings-change
-- [backend/capture_engine.py](backend/capture_engine.py): CaptureLogic, YoloDetector, LatestFrameReader, CameraWorker
-- [backend/dedup.py](backend/dedup.py): duplicate suppression
+- [backend/capture_engine.py](backend/capture_engine.py): YoloDetector, LatestFrameReader, CameraWorker
+- [backend/capture_logic.py](backend/capture_logic.py): vehicle identity, best-frame buffer, when to save
+- [backend/dedup.py](backend/dedup.py): box/image similarity helpers (same_object, iou, phash)
 - [backend/roi.py](backend/roi.py): polygon / mask helpers (multi-ROI)
 - [backend/storage.py](backend/storage.py): cameras.json store, image saving, gallery, recent, thumbnails
 - [backend/settings.py](backend/settings.py): config.ini load/save with validation

@@ -5,7 +5,7 @@ user-drawn ROIs. Read `README.md` (usage), `docs/ARCHITECTURE.md` (design) and `
 A compact index is in `llms.txt`; the whole documentation in one file is `llms-full.txt`.
 
 ## Layout
-- `backend/` Python: `app.py` (API), `capture_engine.py` (workers + `CaptureLogic`), `dedup.py`, `roi.py`,
+- `backend/` Python: `app.py` (API), `capture_engine.py` (workers, detector), `capture_logic.py` (vehicle identity + buffer), `dedup.py`, `roi.py`,
   `storage.py`, `settings.py`, `devices.py`, `camera_io.py`, `tests/`.
 - `frontend/` static UI: `index.html`, `static/js/*.js`, `static/css/app.css`, `static/vendor/fontawesome/`.
 - `config.ini` (settings), `data/` (cameras.json, thumbs/), `captures/` (output). `data/`, `captures/`, models are git-ignored.
@@ -33,8 +33,9 @@ real `config.ini` or `data/cameras.json` (it holds a real camera URL with a pass
 - **Frontend**: no framework, no build step, no `innerHTML`; build DOM with `h()`. Settings edits are a *draft*
   applied only by "Save & restart". Icons are Font Awesome (vendored). Colours come only from the CSS variables at the top of `static/css/app.css` (dark default = VIDES palette, light via `[data-theme=light]`); never hard-code UI colours in JS/HTML (the ROI polygon colours in `roi.js` are intentional annotation colours). The page has no JS test runner here;
   UI changes were verified by driving headless Chrome over the DevTools protocol.
-- **Duplicate logic** (`dedup.py`) deliberately only compares against *recently active* saved vehicles. Do not make
-  it remember saves for long: that drops every later car in the same lane (a real bug that was fixed).
+- **Capture logic** (`capture_logic.py`) is per *vehicle*, not per tracker id: it links ID switches by motion prediction, buffers
+  the best frame and saves once. A vehicle that is still detected must never absorb a new track (two close cars stay two),
+  and a different car arriving later must not be absorbed (it would be lost). Both have regression tests - keep them.
 - Windows is the primary platform: use `pathlib`, avoid shell-specific code, `taskkill` not `kill`.
 
 ## Gotchas

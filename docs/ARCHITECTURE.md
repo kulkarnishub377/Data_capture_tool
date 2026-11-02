@@ -19,27 +19,36 @@ Browser (frontend/)  <--HTTP/JSON, MJPEG-->  Flask app (backend/app.py)
 | File | Responsibility |
 |---|---|
 | `app.py` | `create_app(...)` builds the Flask app: REST API, MJPEG stream, restart-on-settings-change, status merging. `main()` runs it. Dependency-injected (`worker_factory`, `names_loader`, `device_detector`, `grabber`) so tests need no camera or GPU. |
-| `capture_engine.py` | `CaptureLogic` (all per-frame decisions, thread-free and unit-tested), `YoloDetector`, `LatestFrameReader`, `CameraWorker` (threads, reconnect, preview JPEG), `default_classes`, `load_model_names`. |
-| `dedup.py` | `Deduper`: track lock, IoU + perceptual-hash suppression limited to recently *active* saves; `iou`, `phash`. |
+| `capture_logic.py` | `CaptureLogic` + `Detection`: vehicle identity (links tracker-ID switches by motion prediction, drops double boxes), the best-frame **buffer**, when to save. Pure and unit-tested (no threads/model/camera). |
+| `capture_engine.py` | `YoloDetector` (YOLO + ByteTrack via `trackers/bytetrack_vehicle.yaml`, class-agnostic NMS), `LatestFrameReader`, `CameraWorker` (threads, reconnect, preview JPEG), `default_classes`, `load_model_names`. |
+| `dedup.py` | `iou`, `same_object` (one object boxed twice), `phash`. |
 | `roi.py` | Polygon helpers: `point_in_polygon`, `box_overlap_ratio` (cached mask), `make_mask`, `expand_bbox`, `polygon_bbox`, `as_polygons`. Accept one polygon or a list. |
 | `storage.py` | `CameraStore` (atomic JSON, migrates old single `roi` -> `rois`), `save_capture`, `list_captures`, `recent_captures`, `make_thumbnail`, `safe_capture_path`, `delete_capture`, `mask_url`. |
 | `settings.py` | `load` / `save` for `config.ini`: typed values, defaults, choice + range validation, line-preserving writes. |
 | `devices.py` | `detect` (cached GPU probe), `resolve` (parse `DEVICE`, fall back with warnings), `assign` (round-robin cameras over devices). |
 | `camera_io.py` | `CameraError`, `check_port`, `run_with_timeout`, `open_capture` (5 s open/read timeouts), `grab_frame`. |
 
-## Capture logic (`CaptureLogic.process`)
+## Capture logic (`capture_logic.CaptureLogic.process`)
 
-For every frame and every detection:
-1. If the track is already locked (saved): `Deduper.touch` keeps it "active", then skip.
-2. `eligible()`: class selected, conf >= `CONF_THRESH`, shorter side >= `MIN_BOX`, centre inside any ROI polygon,
-   box overlap with the union mask >= `MIN_ROI_OVERLAP`.
-3. `WHEN=first`: `_emit` immediately. `WHEN=best`: keep the best candidate (conf x area); finalize when the track
-   is seen but no longer eligible (left the ROI) or unseen for `LOST_FRAMES` (10) frames; `flush` on stop.
-4. `_emit` locks the track, takes the vehicle **crop**, rejects it if `Deduper.is_duplicate`, else records it.
-   Returns capture requests; the saver thread writes them.
+State: `_vehicles` (vid -> `_Vehicle`: last box/centre/size, smoothed velocity, `last_seen`, the buffered `best`
+candidate, `saved`) and `_by_track` (tracker id -> vid).
 
-`Deduper` remembers a saved vehicle (box + hash) while it keeps being touched and for `DEDUP_SECONDS` after its
-last sighting. IoU > 0.5 or pHash Hamming distance <= 6 inside that window means duplicate.
+For every frame:
+1. `_suppress_overlaps`: detections of the same object (`dedup.same_object`: IoU > 0.5, or the smaller box mostly
+   inside the larger and not tiny next to it) keep only the most confident one.
+2. Detections whose tracker id is known go to their vehicle. A detection with an **unknown** id is matched to a
+   vehicle that is **not detected in this frame** and was seen within `DEDUP_SECONDS`
+   (`_find_lost_vehicle`): with two or more sightings the expected spot is last position + velocity x dt
+   (tolerance `size x (1 + 1.5 dt)`, or it simply stopped); with one sighting the tolerance is `size x (1 + 3 dt)`.
+   No match -> a new vehicle. Linked ids increment `merged` (shown as "skipped" in the UI).
+3. For each vehicle: `_assess` -> eligible (class, conf, min size, centre inside an ROI, overlap with the ROI mask)
+   / still inside. Eligible frames update the buffer when their `_score` beats the buffered one (the older frame
+   is dropped). In `WHEN=first` the first eligible frame is saved at once.
+4. `_finalize` (save once, release the buffer) when: the vehicle's centre leaves the ROIs, it is unseen for longer
+   than `DEDUP_SECONDS`, it has been eligible for `MAX_HOLD_SECONDS`, or `flush()` (stop / restart).
+5. Saved vehicles are kept (to absorb their own ID switches) and forgotten `DEDUP_SECONDS + 5 s` after last seen.
+
+Requests returned: `{track_id, vehicle_id, cls, conf, box, frame, ts}`; the saver thread writes them.
 
 ## Restart-on-save (`app.py`)
 

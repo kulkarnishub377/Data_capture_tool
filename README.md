@@ -42,7 +42,7 @@ Requirements: Python 3.10+ (developed on 3.11/3.13), Windows or Linux. A GPU is 
 
 | Tab | What it does |
 |---|---|
-| **Live** | Settings summary; a camera toolbar with **Start all / Stop all** and a **Layout** selector (Auto, or 1-4 cameras per row, remembered); one live card per camera (video with ROI and detection boxes, status, counters, **full-screen** button, Start/Stop); and a **Recent captures** panel with thumbnails + class tags. Click a thumbnail to enlarge or delete. |
+| **Live** | Settings summary; a camera toolbar with **Start all / Stop all** and a **Layout** selector (Auto, or 1-4 cameras per row, remembered); one live card per camera (video with ROI and detection boxes, status, counters, **full-screen** button, Start/Stop); and a **Recent captures** panel (the latest 10) with thumbnails + class tags. Click a thumbnail to enlarge or delete. |
 | **ROI** | Draw one or more polygons per camera on a fresh snapshot. A vehicle is captured when it is inside **any** ROI. |
 | **Cameras** | Add / enable / test / delete cameras. Passwords are masked in the UI. |
 | **Gallery** | Browse all captures with camera / date / class filters and paging. |
@@ -62,11 +62,12 @@ Edits collect in a draft - rows you changed are highlighted, sections show a dot
 | Detection | Confidence threshold | Ignore detections below this score (0.01 - 1). |
 | | Classes to capture | Searchable picker; "Vehicles" = the model's default set. |
 | Capture | Image to save | **Full frame** (default), **Crop**, or **Both**. |
-| | Capture moment | **First in ROI** (default) or **Best frame** (largest, most confident frame before the vehicle leaves). |
+| | Capture moment | **Best frame (buffered)** (default): the best view of each vehicle is held in a buffer, a better frame replaces the older one, and it is saved once when the vehicle leaves the ROI. **First frame (instant)** saves immediately (lower quality, more duplicates). |
 | | Keep metadata | Off (default) = images only. On = a `.json` next to each image. |
 | Advanced | Minimum vehicle size | Shorter side in px (default 40). |
 | | Minimum overlap with ROI | 0 - 1 (default 0.5). Stops half-in vehicles being saved. |
-| | Duplicate window | Seconds (default 2). See "No duplicates". |
+| | Duplicate window | Seconds (default 2). If the tracker loses a vehicle and gives it a new ID, a track that appears where it was expected within this time is the **same** vehicle. |
+| | Maximum wait | Seconds (default 10). A vehicle that stays in the ROI (stopped / traffic) is saved after this long. |
 | | JPEG quality | 1 - 100 (default 95). |
 | | Detection size | Model input size in px (default 640). |
 
@@ -78,24 +79,43 @@ Per camera, three threads run:
 
 1. **Reader** - reads the RTSP stream (TCP) as fast as it arrives and keeps only the **newest frame**, so slow
    inference never makes the picture lag. Reconnects automatically; open/read timeouts are 5 s.
-2. **Detect + track** - runs YOLO with ByteTrack on the ROI area (plus a 30% margin, so a vehicle half outside
-   the ROI is seen whole). A detection is eligible when: its class is selected, confidence >= threshold, box
-   >= min size, its centre is inside an ROI, and >= min overlap of the box is inside the ROIs.
+2. **Detect + track** - runs YOLO with ByteTrack (settings in `backend/trackers/bytetrack_vehicle.yaml`, class-agnostic
+   NMS) on the ROI area plus a 30% margin, so a vehicle half outside the ROI is seen whole.
 3. **Saver** - writes files from a queue so a slow disk never drops frames.
 
 Each camera loads **its own model instance** (ByteTrack state is per instance) on its assigned device.
 
-### No duplicates
+### One capture per *vehicle* (not per tracker ID)
 
-1. **Track lock** - a tracked vehicle is saved at most once.
-2. **ID-switch guard** - if the tracker gives the same vehicle a new ID, a new track overlapping a saved vehicle
-   that is still in view (IoU > 0.5, seen within the *duplicate window*) is rejected.
-3. **Perceptual hash** on the vehicle crop rejects near-identical images inside that same short window.
+A tracker gives a vehicle an ID, but IDs switch (a missed detection, occlusion, a fast vehicle at a low frame
+rate) and then one vehicle looks like two. The capture logic (`backend/capture_logic.py`) therefore keeps its own
+notion of a **vehicle**:
 
-A saved vehicle is only "remembered" while it keeps being detected plus the duplicate window afterwards, so a
-different car arriving later at the same spot is captured normally. File names never collide (`_2`, `_3` suffix).
+- **Same object boxed twice** in one frame (e.g. 46x40 and 53x65 on the same car, or as "car" and "truck") is
+  one vehicle: the weaker box is dropped.
+- **A new tracker ID that appears where a just-lost vehicle was expected** (its last position + its speed, with a
+  tolerance that grows over the *duplicate window*) is the **same vehicle**. A vehicle that is still being
+  detected never absorbs another track, so two cars driving close together stay two vehicles.
+- A vehicle that has been saved keeps absorbing its own ID switches, so it is never saved a second time.
 
----
+### The buffer: keep the best frame, drop the older ones
+
+While a vehicle is inside an ROI its frames are **not saved**. Only the best candidate is held in memory
+(score = confidence x size x how much of it is inside the ROI, penalised if cut by the frame edge); when a
+better frame arrives it **replaces** the buffered one and the old frame is dropped. The vehicle is saved **once**:
+
+| When | Why |
+|---|---|
+| it leaves the ROI | the normal case |
+| it has not been seen for the duplicate window | it is gone for good |
+| it has stayed `MAX_HOLD_SECONDS` in the ROI | stopped vehicles / traffic jams |
+| you stop capture or restart for new settings | nothing buffered is lost (flush) |
+
+`First frame (instant)` mode skips the buffer and saves the first good frame (the vehicle is still remembered, so
+ID switches do not duplicate it).
+
+The next car in the same lane is captured normally: a different car arriving later, or entering behind the
+previous one, is not mistaken for it. File names never collide (`_2`, `_3` suffix).
 
 ## Files and folders
 
@@ -130,12 +150,13 @@ Edit the file or use the Settings tab (the UI edits lines in place, so your comm
 | Model | `CLASSES` | empty | class **names**, comma separated; empty = auto |
 | Capture | `SAVE_MODE` | `frame` | `frame` / `crop` / `both` |
 | Capture | `SAVE_METADATA` | `false` | |
-| Capture | `WHEN` | `first` | `first` / `best` |
+| Capture | `WHEN` | `best` | `best` (buffer the best frame, save once) / `first` (save immediately) |
 | Capture | `MIN_BOX` | `40` | 1 - 5000 |
 | Capture | `MIN_ROI_OVERLAP` | `0.5` | 0 - 1 |
 | Capture | `JPEG_QUALITY` | `95` | 1 - 100 |
 | Capture | `PAD_NORMAL` / `PAD_BIKE` | `0.15` / `0.40` | crop padding |
-| Capture | `DEDUP_SECONDS` | `2` | 0 - 120 |
+| Capture | `DEDUP_SECONDS` | `2` | 0 - 120. Window for re-linking a lost vehicle after a tracker ID switch |
+| Capture | `MAX_HOLD_SECONDS` | `10` | 1 - 600. Save a vehicle that stays inside the ROI this long |
 
 Environment variables: `PORT` (default 5100), `NO_BROWSER=1`, `DCT_CONFIG` and `DCT_DATA` (use another
 config file / data folder - handy for testing without touching your real setup).
@@ -150,6 +171,7 @@ config file / data folder - handy for testing without touching your real setup).
 | Start says "Draw an ROI" | The camera has no ROI yet - use the ROI tab. |
 | Start says "Model file not found" | Pick an existing model in Settings. |
 | Settings Save says a class was ignored | The class name is not in the selected model; it is reported, never silent. |
+| One vehicle captured twice | Raise **Duplicate window** a little (e.g. 3-4 s) or use a faster model/device so the tracker keeps up; check `Best frame` mode is on. Two vehicles close together are deliberately kept separate. |
 | Nothing is captured | Check the ROI covers the road, confidence is not too high, classes include the vehicle type, and min size/overlap are not too strict. |
 | Stop takes a few seconds | The stream was hung; shutdown waits for the reader (max ~10 s). |
 
