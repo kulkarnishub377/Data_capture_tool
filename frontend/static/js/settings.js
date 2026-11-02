@@ -191,8 +191,13 @@
 
   /* Fill every control from the server (used on first load, after Save and on Discard). */
   async function loadControls() {
-    const [models, s, dev] = await Promise.all([api("/models"), api("/settings"), api("/devices")]);
+    const [models, s, dev, paths] = await Promise.all([api("/models"), api("/settings"), api("/devices"), api("/paths")]);
     settings = s;
+    const info = $("#models-dir-info");
+    info.className = "path-info" + (paths.models_dir_exists ? "" : " bad");
+    info.textContent = paths.models_dir_exists
+      ? `Models folder: ${paths.models_dir} (${paths.models_count} model${paths.models_count === 1 ? "" : "s"})`
+      : `Models folder not found: ${paths.models_dir} - fix MODELS_DIR in config.ini and restart the service`;
     const sm = $("#sel-model");
     sm.replaceChildren(...models.map(m => h("option", { value: m }, m)));
     if (!models.includes(s.MODEL)) sm.prepend(h("option", { value: s.MODEL }, s.MODEL + " (missing)"));

@@ -29,7 +29,8 @@ real `config.ini` or `data/cameras.json` (it holds a real camera URL with a pass
   and to `WORKER_KEYS` in `app.py` if a running worker must restart when it changes.
 - **ROI data model** is `rois` (list of polygons). `roi.py` functions accept one polygon or a list.
 - **Never expose camera passwords**: API responses go through `public()` / `storage.mask_url`.
-- **Paths from clients** must go through `storage.safe_capture_path`.
+- **Paths from clients** must go through `storage.safe_capture_path`. **Configured folders** (`MODELS_DIR`, `OUTPUT_DIR`) go through
+  `settings.resolve_path` (`~`, env vars, relative-to-config, absolute) - never `base / value` directly.
 - **Frontend**: no framework, no build step, no `innerHTML`; build DOM with `h()`. Settings edits are a *draft*
   applied only by "Save & restart". Icons are Font Awesome (vendored). Colours come only from the CSS variables at the top of `static/css/app.css` (dark default = VIDES palette, light via `[data-theme=light]`); never hard-code UI colours in JS/HTML (the ROI polygon colours in `roi.js` are intentional annotation colours). The page has no JS test runner here;
   UI changes were verified by driving headless Chrome over the DevTools protocol.

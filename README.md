@@ -151,7 +151,7 @@ Edit the file or use the Settings tab (the UI edits lines in place, so your comm
 | App | `DEBUG` | `true` | DEBUG logging + Flask debug mode (reloader off). The interactive debugger is **never** enabled when the server is reachable from the network. |
 | App | `HOST` | `0.0.0.0` | `0.0.0.0` = reachable from other machines; `127.0.0.1` = this machine only. |
 | App | `PORT` | `5100` | Web UI port (1 - 65535). Edit it here and restart the service. |
-| Paths | `MODELS_DIR` | `../models` | Relative to `config.ini`. A path starting with `/` is taken from the root of the drive/filesystem, e.g. `/_VIDES/_backend_service_combined/models` on the deployment device. |
+| Paths | `MODELS_DIR` | `../models` | Relative to `config.ini`. `~` = the home folder of the user running the service (e.g. `~/_VIDES/_backend_service_combined/models`); environment variables are expanded; a path starting with `/` is taken from the filesystem root. |
 | Paths | `OUTPUT_DIR` | `./captures` | |
 | Model | `MODEL` | | file inside `MODELS_DIR` |
 | Model | `DEVICE` | `auto` | `auto`, `cpu`, `cuda:0`, `cuda:0,cuda:1` |
@@ -177,7 +177,7 @@ config file / data folder - handy for testing without touching your real setup).
 | Symptom | Cause / fix |
 |---|---|
 | Other machines cannot open the page | Check `HOST = 0.0.0.0`, that you use the address printed at start, and that the OS firewall allows the `PORT` (Windows: inbound rule for TCP 5100). |
-| No models in the dropdown | `MODELS_DIR` does not exist on this machine (e.g. `/_VIDES/...` is only on the deployment device) or has no `*.pt` files. |
+| No models in the dropdown | `MODELS_DIR` does not exist for the user running the service, or has no `*.pt` files. Settings > Model shows the resolved folder and whether it was found (`GET /api/paths`). |
 | Snapshot / Test says `Cannot reach host:port (timed out)` | The camera is offline, the port is wrong, or it is blocked. The tool checks the TCP port first so this fails in ~4 s instead of hanging. |
 | `did not respond with a picture` | Port is open but the stream path or credentials are wrong, or the camera is at its connection limit. |
 | Card says `reconnecting` | The stream dropped; it retries with backoff. The message under the chip says why. |

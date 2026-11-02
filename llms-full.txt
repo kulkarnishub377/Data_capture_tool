@@ -161,7 +161,7 @@ Edit the file or use the Settings tab (the UI edits lines in place, so your comm
 | App | `DEBUG` | `true` | DEBUG logging + Flask debug mode (reloader off). The interactive debugger is **never** enabled when the server is reachable from the network. |
 | App | `HOST` | `0.0.0.0` | `0.0.0.0` = reachable from other machines; `127.0.0.1` = this machine only. |
 | App | `PORT` | `5100` | Web UI port (1 - 65535). Edit it here and restart the service. |
-| Paths | `MODELS_DIR` | `../models` | Relative to `config.ini`. A path starting with `/` is taken from the root of the drive/filesystem, e.g. `/_VIDES/_backend_service_combined/models` on the deployment device. |
+| Paths | `MODELS_DIR` | `../models` | Relative to `config.ini`. `~` = the home folder of the user running the service (e.g. `~/_VIDES/_backend_service_combined/models`); environment variables are expanded; a path starting with `/` is taken from the filesystem root. |
 | Paths | `OUTPUT_DIR` | `./captures` | |
 | Model | `MODEL` | | file inside `MODELS_DIR` |
 | Model | `DEVICE` | `auto` | `auto`, `cpu`, `cuda:0`, `cuda:0,cuda:1` |
@@ -187,7 +187,7 @@ config file / data folder - handy for testing without touching your real setup).
 | Symptom | Cause / fix |
 |---|---|
 | Other machines cannot open the page | Check `HOST = 0.0.0.0`, that you use the address printed at start, and that the OS firewall allows the `PORT` (Windows: inbound rule for TCP 5100). |
-| No models in the dropdown | `MODELS_DIR` does not exist on this machine (e.g. `/_VIDES/...` is only on the deployment device) or has no `*.pt` files. |
+| No models in the dropdown | `MODELS_DIR` does not exist for the user running the service, or has no `*.pt` files. Settings > Model shows the resolved folder and whether it was found (`GET /api/paths`). |
 | Snapshot / Test says `Cannot reach host:port (timed out)` | The camera is offline, the port is wrong, or it is blocked. The tool checks the TCP port first so this fails in ~4 s instead of hanging. |
 | `did not respond with a picture` | Port is open but the stream path or credentials are wrong, or the camera is at its connection limit. |
 | Card says `reconnecting` | The stream dropped; it retries with backoff. The message under the chip says why. |
@@ -339,6 +339,7 @@ Camera objects returned by the API have the RTSP password replaced by `****`.
 | `GET /api/settings` | all `config.ini` values, typed |
 | `PUT /api/settings` | partial update. Validates choices/ranges (400 on error). If any worker-relevant key actually changed, running cameras restart once (counters kept). `MODEL` must exist in `MODELS_DIR`. |
 | `GET /api/models` | sorted `*.pt` names in `MODELS_DIR` |
+| `GET /api/paths` | `{models_dir, models_dir_exists, models_count, output_dir}`: the resolved folders (`~`, env vars and relative paths expanded) |
 | `GET /api/model/classes?model=` | `{names, selected, default, warnings}`; `selected` honours `CLASSES`, unknown names go to `warnings` |
 | `GET /api/devices` | `{gpus:[{id,name,memory_mb}], pool, warnings}` |
 
@@ -399,7 +400,8 @@ real `config.ini` or `data/cameras.json` (it holds a real camera URL with a pass
   and to `WORKER_KEYS` in `app.py` if a running worker must restart when it changes.
 - **ROI data model** is `rois` (list of polygons). `roi.py` functions accept one polygon or a list.
 - **Never expose camera passwords**: API responses go through `public()` / `storage.mask_url`.
-- **Paths from clients** must go through `storage.safe_capture_path`.
+- **Paths from clients** must go through `storage.safe_capture_path`. **Configured folders** (`MODELS_DIR`, `OUTPUT_DIR`) go through
+  `settings.resolve_path` (`~`, env vars, relative-to-config, absolute) - never `base / value` directly.
 - **Frontend**: no framework, no build step, no `innerHTML`; build DOM with `h()`. Settings edits are a *draft*
   applied only by "Save & restart". Icons are Font Awesome (vendored). Colours come only from the CSS variables at the top of `static/css/app.css` (dark default = VIDES palette, light via `[data-theme=light]`); never hard-code UI colours in JS/HTML (the ROI polygon colours in `roi.js` are intentional annotation colours). The page has no JS test runner here;
   UI changes were verified by driving headless Chrome over the DevTools protocol.

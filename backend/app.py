@@ -56,9 +56,8 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
 
     def cfg():
         c = settings.load(config_path)
-        base = config_path.parent
         for k in ("MODELS_DIR", "OUTPUT_DIR"):
-            c[k] = str((base / c[k]).resolve())
+            c[k] = str(settings.resolve_path(config_path.parent, c[k]))
         return c
 
     def model_names(c, model):
@@ -171,6 +170,15 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
     def models_list():
         d = Path(cfg()["MODELS_DIR"])
         return jsonify(sorted(p.name for p in d.glob("*.pt")) if d.is_dir() else [])
+
+    @app.get("/api/paths")
+    def paths_info():
+        """Where models are read from / images are written (resolved), and whether the models folder exists."""
+        c = cfg()
+        d = Path(c["MODELS_DIR"])
+        return jsonify({"models_dir": str(d), "models_dir_exists": d.is_dir(),
+                        "models_count": len(list(d.glob("*.pt"))) if d.is_dir() else 0,
+                        "output_dir": c["OUTPUT_DIR"]})
 
     @app.get("/api/devices")
     def devices_list():

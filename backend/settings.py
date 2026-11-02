@@ -1,5 +1,6 @@
 """config.ini loading/saving with typed values and defaults."""
 import configparser
+import os
 import re
 from pathlib import Path
 
@@ -122,3 +123,12 @@ def save(path, updates: dict) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
     tmp.replace(path)
+
+
+def resolve_path(base, value) -> Path:
+    """Turn a configured folder into an absolute path.
+
+    `~` is the user's home folder, environment variables are expanded, a relative path is relative to `base`
+    (the folder of config.ini), and a path starting with / is taken from the drive/filesystem root."""
+    p = Path(os.path.expandvars(os.path.expanduser(str(value))))
+    return (p if p.is_absolute() else Path(base) / p).resolve()
