@@ -8,3 +8,8 @@ venv/
 *.onnx
 *.engine
 .pytest_cache/
+
+# PaddlePaddle inference models (large)
+*.pdmodel
+*.pdiparams
+*.pdiparams.info

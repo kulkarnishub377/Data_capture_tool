@@ -16,6 +16,7 @@ Key facts for tools and agents:
 - [README](README.md): install, usage, every setting, troubleshooting
 - [Architecture](docs/ARCHITECTURE.md): modules, capture logic, restart flow, data formats, threading
 - [HTTP API](docs/API.md): every endpoint with request/response shapes
+- [PP-Vehicle evaluation](docs/PADDLE_VEHICLE.md): the PaddleDetection vehicle detectors - what they are, measured results, compatibility, device setup
 - [AGENTS.md](AGENTS.md): conventions, test commands, gotchas for AI coding assistants
 
 ## Code map
