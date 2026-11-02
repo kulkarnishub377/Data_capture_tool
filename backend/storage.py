@@ -24,9 +24,14 @@ class CameraStore:
         if not self.path.exists():
             return []
         try:
-            return json.loads(self.path.read_text(encoding="utf-8"))
+            cams = json.loads(self.path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return []
+        for c in cams:  # migrate the old single "roi" to the "rois" list
+            old = c.pop("roi", None)
+            if "rois" not in c:
+                c["rois"] = [old] if old and len(old) >= 3 else []
+        return cams
 
     def _write(self, cams):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -45,7 +50,7 @@ class CameraStore:
         with self._lock:
             cams = self._read()
             cam = {"id": uuid.uuid4().hex[:8], "name": name, "url": url, "enabled": True,
-                   "roi": [], "frame_size": None, "device": device}
+                   "rois": [], "frame_size": None, "device": device}
             cams.append(cam)
             self._write(cams)
             return cam
@@ -64,11 +69,14 @@ class CameraStore:
         with self._lock:
             self._write([c for c in self._read() if c["id"] != cam_id])
 
-    def set_roi(self, cam_id, points, frame_size):
-        if len(points) < 3:
-            raise ValueError("ROI needs at least 3 points")
-        return self.update(cam_id, roi=[[int(x), int(y)] for x, y in points],
-                           frame_size=list(frame_size))
+    def set_rois(self, cam_id, rois, frame_size):
+        """Replace all ROI polygons of a camera. Every polygon needs >= 3 points; [] clears them."""
+        clean = []
+        for poly in rois:
+            if len(poly) < 3:
+                raise ValueError("every ROI needs at least 3 points")
+            clean.append([[int(x), int(y)] for x, y in poly])
+        return self.update(cam_id, rois=clean, frame_size=list(frame_size))
 
 
 def _crop(frame, box, pad):
@@ -88,6 +96,11 @@ def save_capture(root, cam, cls, ts, frame, box, mode, quality, pad_normal, pad_
         targets.append(("frame", frame))
     if mode in ("crop", "both"):
         targets.append(("crop", _crop(frame, box, pad)))
+    n = 1
+    base = stem
+    while any((day / sub / f"{stem}.jpg").exists() for sub, _ in targets):
+        n += 1
+        stem = f"{base}_{n}"
     written = []
     for sub, img in targets:
         if img is None or img.size == 0:
@@ -103,10 +116,18 @@ def save_capture(root, cam, cls, ts, frame, box, mode, quality, pad_normal, pad_
     return written
 
 
-def _class_from_name(cam_dir_name, stem):
-    rest = stem[len(cam_dir_name) + 1:] if stem.startswith(cam_dir_name + "_") else stem
-    parts = rest.rsplit("_", 3)
-    return parts[0] if len(parts) == 4 else rest
+_NAME_RE = re.compile(r"^(?P<rest>.+)_(?P<d>\d{8})_(?P<t>\d{6})_(?P<ms>\d{3})(?:_(?P<n>\d+))?$")
+
+
+def _parse_name(cam_dir_name, stem):
+    """-> (class, sort_key). Class names may contain underscores (auto_rickshaw)."""
+    m = _NAME_RE.match(stem)
+    if not m:
+        return stem, ("", "", "", 0)
+    rest = m["rest"]
+    if rest.startswith(cam_dir_name + "_"):
+        rest = rest[len(cam_dir_name) + 1:]
+    return rest, (m["d"], m["t"], m["ms"], int(m["n"] or 1))
 
 
 def list_captures(root, camera=None, date=None, cls=None, page=1, per_page=60):
@@ -118,7 +139,7 @@ def list_captures(root, camera=None, date=None, cls=None, page=1, per_page=60):
             if len(rel.parts) != 4:
                 continue
             cam_dir, day, kind, _ = rel.parts
-            c = _class_from_name(cam_dir, p.stem)
+            c, key = _parse_name(cam_dir, p.stem)
             if camera and cam_dir != safe_name(camera):
                 continue
             if date and day != date:
@@ -126,8 +147,10 @@ def list_captures(root, camera=None, date=None, cls=None, page=1, per_page=60):
             if cls and c != cls:
                 continue
             items.append({"path": rel.as_posix(), "camera": cam_dir, "date": day,
-                          "kind": kind, "class": c, "name": p.name})
-    items.sort(key=lambda i: i["name"].rsplit("_", 3)[-3:], reverse=True)
+                          "kind": kind, "class": c, "name": p.name, "_key": key})
+    items.sort(key=lambda i: i["_key"], reverse=True)
+    for i in items:
+        del i["_key"]
     total = len(items)
     start = (max(1, page) - 1) * per_page
     return {"total": total, "page": page, "per_page": per_page,
@@ -152,3 +175,15 @@ def delete_capture(root, rel):
     j = p.with_suffix(".json")
     if j.exists():
         j.unlink()
+
+
+def mask_url(url: str) -> str:
+    """Hide the password in scheme://user:password@host/... (password may itself contain '@')."""
+    m = re.match(r"^([A-Za-z][A-Za-z0-9+.-]*://)([^/]*)(.*)$", url or "")
+    if not m:
+        return url
+    scheme, auth, rest = m.groups()
+    userinfo, at, host = auth.rpartition("@")
+    if not at or ":" not in userinfo:
+        return url
+    return f"{scheme}{userinfo.split(':', 1)[0]}:****@{host}{rest}"

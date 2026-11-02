@@ -1,9 +1,11 @@
 """config.ini loading/saving with typed values and defaults."""
 import configparser
+import re
 from pathlib import Path
 
 # key -> (section, default)
 DEFAULTS = {
+    "DEBUG": ("App", True),
     "MODELS_DIR": ("Paths", "../models"),
     "OUTPUT_DIR": ("Paths", "./captures"),
     "MODEL": ("Model", "yolov8s.pt"),
@@ -20,7 +22,7 @@ DEFAULTS = {
     "JPEG_QUALITY": ("Capture", 95),
     "PAD_NORMAL": ("Capture", 0.15),
     "PAD_BIKE": ("Capture", 0.40),
-    "DEDUP_SECONDS": ("Capture", 30),
+    "DEDUP_SECONDS": ("Capture", 2),
 }
 CHOICES = {"SAVE_MODE": {"frame", "crop", "both"}, "WHEN": {"first", "best"}}
 
@@ -70,24 +72,41 @@ def load(path) -> dict:
     return out
 
 
+def _set_line(lines: list, section: str, key: str, text: str) -> list:
+    """Replace `key = ...` inside [section] (keeping comments), or insert/append it."""
+    header = f"[{section.lower()}]"
+    sec_start = next((i for i, ln in enumerate(lines) if ln.strip().lower() == header), None)
+    new = f"{key} = {text}".rstrip() if text else f"{key} ="
+    if sec_start is None:
+        return lines + ([""] if lines and lines[-1].strip() else []) + [f"[{section}]", new]
+    end = len(lines)
+    for i in range(sec_start + 1, len(lines)):
+        if lines[i].strip().startswith("["):
+            end = i
+            break
+    pat = re.compile(rf"^\s*{re.escape(key)}\s*[=:]", re.IGNORECASE)
+    for i in range(sec_start + 1, end):
+        if pat.match(lines[i]):
+            lines[i] = new
+            return lines
+    last = end - 1
+    while last > sec_start and not lines[last].strip():
+        last -= 1
+    lines.insert(last + 1, new)
+    return lines
+
+
 def save(path, updates: dict) -> None:
-    """Persist known keys only; other existing keys are preserved."""
+    """Persist known keys only. Edits lines in place so comments/other keys survive."""
     for key, value in updates.items():
         if key in DEFAULTS:
             _validate(key, value)
     path = Path(path)
-    cp = configparser.ConfigParser(inline_comment_prefixes=(";", "#"))
-    if path.exists():
-        cp.read(path, encoding="utf-8")
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     for key, value in updates.items():
-        if key not in DEFAULTS:
-            continue
-        section = DEFAULTS[key][0]
-        if not cp.has_section(section):
-            cp.add_section(section)
-        cp.set(section, key, _to_text(value))
+        if key in DEFAULTS:
+            lines = _set_line(lines, DEFAULTS[key][0], key, _to_text(value))
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        cp.write(f)
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
     tmp.replace(path)

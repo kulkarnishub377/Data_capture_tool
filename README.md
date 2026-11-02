@@ -21,7 +21,8 @@ python backend/app.py          # or start.bat  ->  http://127.0.0.1:5100
 
 ## Use
 1. **Cameras** - add a name + RTSP URL, press *Test*.
-2. **ROI** - pick the camera, *Load snapshot*, click to place points (drag to adjust), *Save ROI*.
+2. **ROI** - pick the camera, *Load snapshot*, click to place points (drag to adjust). Use *+ New ROI* to draw
+   more than one area on the same camera (a vehicle is captured inside ANY of them), then *Save ROIs*.
 3. **Live** - choose model / device / save mode / metadata / classes, press *Start*.
 4. **Gallery** - review, filter, enlarge, delete.
 
@@ -35,12 +36,13 @@ python backend/app.py          # or start.bat  ->  http://127.0.0.1:5100
 | `SAVE_MODE` | `frame` (default), `crop`, or `both` |
 | `SAVE_METADATA` | `true` writes a `.json` next to each image; default `false` |
 | `WHEN` | `first` (first qualifying frame in ROI) or `best` (best frame before leaving ROI) |
-| `DEDUP_SECONDS` | window for the duplicate checks |
+| `DEDUP_SECONDS` | how long a saved vehicle is remembered after it was last seen (default 2) |
+| `DEBUG` | `true` = Flask debug mode + DEBUG logging (default) |
 
 ## No duplicates
 1. A tracked vehicle is saved once (track lock).
-2. A new track overlapping a recent save (IoU > 0.5, within `DEDUP_SECONDS`) is rejected - covers tracker ID switches.
-3. A perceptual-hash check on the vehicle crop rejects near-identical images in that window.
+2. A new track overlapping a saved vehicle that is still in view (IoU > 0.5, seen within `DEDUP_SECONDS`) is rejected - covers tracker ID switches.
+3. A perceptual-hash check on the vehicle crop rejects near-identical images in that same short window.
 
 ## Tests
 ```

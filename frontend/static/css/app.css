@@ -70,3 +70,7 @@ button.danger { color: var(--bad); }
   .grid { grid-template-columns: 1fr; }
   input.wide { min-width: 0; width: 100%; }
 }
+
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chips button { border-left-width: 6px; padding: 3px 10px; }
+.chips button.active { background: var(--accent); color: var(--accent-text); }

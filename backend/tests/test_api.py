@@ -163,3 +163,86 @@ def test_capture_path_traversal_rejected(env, bad):
 def test_stream_404_when_not_running(env):
     c, _ = env
     assert c.get("/api/stream/nope").status_code == 404
+
+
+def test_api_never_returns_camera_password(env):
+    c, _ = env
+    r = c.post("/api/cameras", json={"name": "S", "url": "rtsp://admin:Secret@123@1.2.3.4:554/s"}).get_json()
+    assert "Secret" not in r["url"] and "****" in r["url"]
+    assert "Secret" not in c.get("/api/cameras").get_data(as_text=True)
+
+
+def _ready_cam(c):
+    cam = _cam(c)
+    c.put(f"/api/cameras/{cam['id']}/roi", json={"points": [[0, 0], [9, 0], [9, 9]], "frame_size": [640, 480]})
+    return cam
+
+
+def test_disabling_running_camera_stops_it(env):
+    c, _ = env
+    cam = _ready_cam(c)
+    c.post(f"/api/capture/{cam['id']}/start")
+    c.put(f"/api/cameras/{cam['id']}", json={"enabled": False})
+    assert FakeWorker.instances[0].running is False
+
+
+def test_start_replaces_worker_in_error_state(env):
+    c, _ = env
+    cam = _ready_cam(c)
+    c.post(f"/api/capture/{cam['id']}/start")
+    FakeWorker.instances[0].status = lambda: {"state": "error", "saved": 0, "skipped": 0,
+                                              "message": "x", "device": "cpu"}
+    r = c.post(f"/api/capture/{cam['id']}/start")
+    assert r.status_code == 200 and len(FakeWorker.instances) == 2
+
+
+def test_unknown_class_names_produce_visible_warning(env):
+    c, _ = env
+    c.put("/api/settings", json={"CLASSES": ["car", "spaceship"]})
+    cam = _ready_cam(c)
+    r = c.post(f"/api/capture/{cam['id']}/start").get_json()
+    assert any("spaceship" in w for w in r["warnings"])
+    assert any("spaceship" in w for w in c.get("/api/model/classes").get_json()["warnings"])
+
+
+def test_snapshot_failure_gives_clear_message(tmp_path):
+    (tmp_path / "models").mkdir()
+    cfg = tmp_path / "config.ini"
+    settings.save(cfg, {"MODELS_DIR": "models", "OUTPUT_DIR": "captures"})
+    c = appmod.create_app(cfg, tmp_path / "data", worker_factory=FakeWorker, grabber=lambda u: None).test_client()
+    cam = c.post("/api/cameras", json={"name": "A", "url": "rtsp://x"}).get_json()
+    r = c.get(f"/api/cameras/{cam['id']}/snapshot")
+    assert r.status_code == 502 and "respond" in r.get_json()["error"]
+    t = c.post(f"/api/cameras/{cam['id']}/test").get_json()
+    assert t["ok"] is False and "respond" in t["error"]
+
+
+def test_snapshot_surfaces_unreachable_camera_reason(tmp_path):
+    (tmp_path / "models").mkdir()
+    cfg = tmp_path / "config.ini"
+    settings.save(cfg, {"MODELS_DIR": "models", "OUTPUT_DIR": "captures"})
+
+    def grab(url):
+        raise appmod.CameraError("Cannot reach 1.2.3.4:5549 (timed out) - check host and port")
+
+    c = appmod.create_app(cfg, tmp_path / "data", worker_factory=FakeWorker, grabber=grab).test_client()
+    cam = c.post("/api/cameras", json={"name": "A", "url": "rtsp://1.2.3.4:5549/x"}).get_json()
+    r = c.get(f"/api/cameras/{cam['id']}/snapshot")
+    assert r.status_code == 502 and "1.2.3.4:5549" in r.get_json()["error"]
+
+
+def test_multiple_rois_saved_and_returned(env):
+    c, _ = env
+    cam = _cam(c)
+    tri = [[0, 0], [9, 0], [9, 9]]
+    r = c.put(f"/api/cameras/{cam['id']}/roi", json={"rois": [tri, tri], "frame_size": [640, 480]})
+    assert r.status_code == 200
+    assert len(c.get("/api/cameras").get_json()[0]["rois"]) == 2
+
+
+def test_rois_with_an_invalid_polygon_rejected(env):
+    c, _ = env
+    cam = _cam(c)
+    tri = [[0, 0], [9, 0], [9, 9]]
+    r = c.put(f"/api/cameras/{cam['id']}/roi", json={"rois": [tri, [[0, 0], [1, 1]]], "frame_size": [640, 480]})
+    assert r.status_code == 400

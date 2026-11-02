@@ -47,11 +47,14 @@
     <div class="bar">
       <label>Camera <select id="roi-cam"></select></label>
       <button id="roi-load">Load snapshot</button>
-      <button id="roi-undo">Undo</button>
-      <button id="roi-reset">Reset</button>
-      <button id="roi-save" class="primary" disabled>Save ROI</button>
-      <span class="hint" id="roi-hint">Click to add points. Drag a point to move it. Need at least 3 points.</span>
+      <button id="roi-new">+ New ROI</button>
+      <button id="roi-undo">Undo point</button>
+      <button id="roi-del">Delete ROI</button>
+      <button id="roi-reset">Clear all</button>
+      <button id="roi-save" class="primary" disabled>Save ROIs</button>
     </div>
+    <div class="bar"><span id="roi-chips" class="chips"></span>
+      <span class="hint" id="roi-hint">Click to add points. Drag a point to move it. Use "+ New ROI" to draw another area on the same camera.</span></div>
     <div class="canvas-wrap"><canvas id="roi-canvas" width="960" height="540"></canvas></div>
   </section>
 

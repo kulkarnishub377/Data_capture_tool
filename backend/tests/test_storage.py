@@ -22,8 +22,8 @@ def test_camera_store_crud_and_roi(tmp_path):
     s = storage.CameraStore(tmp_path / "cameras.json")
     cam = s.add("Cam-01", "rtsp://x", device="cuda:1")
     assert s.list()[0]["name"] == "Cam-01"
-    s.set_roi(cam["id"], [[0, 0], [10, 0], [10, 10]], [640, 480])
-    assert s.list()[0]["roi"] == [[0, 0], [10, 0], [10, 10]]
+    s.set_rois(cam["id"], [[[0, 0], [10, 0], [10, 10]]], [640, 480])
+    assert s.list()[0]["rois"] == [[[0, 0], [10, 0], [10, 10]]]
     s.update(cam["id"], enabled=False)
     assert s.list()[0]["enabled"] is False
     s.delete(cam["id"])
@@ -44,7 +44,7 @@ def test_set_roi_requires_three_points(tmp_path):
     s = storage.CameraStore(tmp_path / "c.json")
     cam = s.add("A", "rtsp://a")
     with pytest.raises(ValueError):
-        s.set_roi(cam["id"], [[0, 0], [1, 1]], [640, 480])
+        s.set_rois(cam["id"], [[[0, 0], [1, 1]]], [640, 480])
 
 
 @pytest.mark.parametrize("mode,frames,crops", [("frame", 1, 0), ("crop", 0, 1), ("both", 1, 1)])
@@ -97,3 +97,41 @@ def test_delete_capture_removes_json_too(tmp_path):
     rel = paths[0].relative_to(tmp_path).as_posix()
     storage.delete_capture(tmp_path, rel)
     assert not paths[0].exists() and not paths[0].with_suffix(".json").exists()
+
+
+def test_two_captures_same_millisecond_do_not_overwrite(tmp_path):
+    a = _save(tmp_path, "frame")[0]
+    b = _save(tmp_path, "frame")[0]
+    assert a != b and a.exists() and b.exists()
+    res = storage.list_captures(tmp_path)
+    assert res["total"] == 2 and {i["class"] for i in res["items"]} == {"car"}
+
+
+def test_class_with_underscore_parsed_with_collision_suffix(tmp_path):
+    _save(tmp_path, "frame", cls="auto_rickshaw")
+    _save(tmp_path, "frame", cls="auto_rickshaw")
+    assert {i["class"] for i in storage.list_captures(tmp_path)["items"]} == {"auto_rickshaw"}
+
+
+def test_mask_url_hides_password_even_with_at_sign():
+    assert storage.mask_url("rtsp://admin:Arya@123@1.2.3.4:554/s") == "rtsp://admin:****@1.2.3.4:554/s"
+    assert storage.mask_url("rtsp://1.2.3.4/s") == "rtsp://1.2.3.4/s"
+    assert storage.mask_url("rtsp://admin:pw%40x@h:1/p") == "rtsp://admin:****@h:1/p"
+
+
+def test_old_single_roi_is_migrated_to_rois(tmp_path):
+    p = tmp_path / "c.json"
+    p.write_text(json.dumps([{"id": "x", "name": "A", "url": "u", "enabled": True,
+                              "roi": [[0, 0], [9, 0], [9, 9]], "frame_size": [640, 480]}]))
+    cam = storage.CameraStore(p).list()[0]
+    assert cam["rois"] == [[[0, 0], [9, 0], [9, 9]]] and "roi" not in cam
+
+
+def test_set_rois_validates_every_polygon_and_allows_clearing(tmp_path):
+    s = storage.CameraStore(tmp_path / "c.json")
+    cam = s.add("A", "u")
+    tri = [[0, 0], [9, 0], [9, 9]]
+    with pytest.raises(ValueError):
+        s.set_rois(cam["id"], [tri, [[0, 0], [1, 1]]], [640, 480])
+    assert len(s.set_rois(cam["id"], [tri, tri], [640, 480])["rois"]) == 2
+    assert s.set_rois(cam["id"], [], [640, 480])["rois"] == []

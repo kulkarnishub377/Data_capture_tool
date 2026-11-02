@@ -28,7 +28,8 @@
         if (!confirm(`Delete camera "${c.name}"? Captured images are kept.`)) return;
         try { await api(`/cameras/${c.id}`, { method: "DELETE" }); render(); } catch (e) { /* toast */ }
       });
-      const roi = (c.roi || []).length >= 3 ? `ROI: ${c.roi.length} points` : "No ROI yet";
+      const n = (c.rois || []).length;
+      const roi = n ? `${n} ROI${n === 1 ? "" : "s"}` : "No ROI yet";
       list.append(h("div", { class: "row" },
         h("label", {}, en, " Enabled"),
         h("div", { class: "grow" }, h("strong", {}, c.name),

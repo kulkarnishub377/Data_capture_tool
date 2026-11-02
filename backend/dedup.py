@@ -1,6 +1,4 @@
 """Duplicate suppression: track lock, IoU+time window, perceptual hash."""
-from collections import deque
-
 import cv2
 import numpy as np
 
@@ -27,12 +25,21 @@ def _hamming(a: int, b: int) -> int:
 
 
 class Deduper:
-    def __init__(self, seconds=30, hash_dist=6, history=50, iou_thresh=0.5):
+    """Suppress the SAME vehicle being saved twice (e.g. after a tracker ID switch).
+
+    A saved vehicle is remembered while it keeps being detected (touch) and for `seconds`
+    after it was last seen. A different vehicle arriving later at the same spot is NOT
+    a duplicate.
+    """
+
+    def __init__(self, seconds=2, hash_dist=6, history=50, iou_thresh=0.5):
         self.seconds = seconds
         self.hash_dist = hash_dist
+        self.history = history
         self.iou_thresh = iou_thresh
         self._tracks = set()
-        self._recent = deque(maxlen=history)  # (time, box, hash)
+        self._recent = {}   # key -> [last_seen, box, hash]
+        self._anon = 0
         self.skipped = 0
 
     def locked(self, track_id) -> bool:
@@ -41,9 +48,15 @@ class Deduper:
     def lock(self, track_id) -> None:
         self._tracks.add(track_id)
 
+    def touch(self, track_id, box, now) -> None:
+        """A saved track is still being detected: keep it 'active' at its latest position."""
+        e = self._recent.get(track_id)
+        if e is not None:
+            e[0], e[1] = now, tuple(box)
+
     def is_duplicate(self, box, img, now) -> bool:
         h = phash(img)
-        for t, b, hh in self._recent:
+        for t, b, hh in self._recent.values():
             if now - t > self.seconds:
                 continue
             if iou(box, b) > self.iou_thresh or _hamming(h, hh) <= self.hash_dist:
@@ -51,5 +64,10 @@ class Deduper:
                 return True
         return False
 
-    def record(self, box, img, now) -> None:
-        self._recent.append((now, tuple(box), phash(img)))
+    def record(self, box, img, now, track_id=None) -> None:
+        if track_id is None:
+            track_id = ("anon", self._anon)
+            self._anon += 1
+        self._recent[track_id] = [now, tuple(box), phash(img)]
+        while len(self._recent) > self.history:
+            self._recent.pop(next(iter(self._recent)))

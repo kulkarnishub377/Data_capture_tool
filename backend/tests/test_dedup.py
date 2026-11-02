@@ -51,3 +51,19 @@ def test_same_image_after_window_is_not_duplicate():
     img = _img(6)
     d.record((0, 0, 50, 50), img, now=0.0)
     assert d.is_duplicate((400, 400, 450, 450), img.copy(), now=500.0) is False
+
+
+def test_different_car_same_spot_seconds_later_is_not_duplicate():
+    d = dedup.Deduper(seconds=2)
+    box = (100, 100, 200, 200)
+    d.record(box, _img(10), now=0.0, track_id=1)
+    d.touch(1, box, now=1.0)
+    assert d.is_duplicate(box, _img(11), now=6.0) is False
+
+
+def test_new_id_at_same_spot_while_saved_track_still_active_is_duplicate():
+    d = dedup.Deduper(seconds=2)
+    box = (100, 100, 200, 200)
+    d.record(box, _img(12), now=0.0, track_id=1)
+    d.touch(1, box, now=1.0)
+    assert d.is_duplicate(box, _img(13), now=2.5) is True

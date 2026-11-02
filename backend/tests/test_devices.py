@@ -42,3 +42,12 @@ def test_override_wins_when_available():
 def test_override_unavailable_ignored():
     got = devices.assign(["a"], ["cuda:0"], {"a": "cuda:5"})
     assert got["a"] == "cuda:0"
+
+
+def test_detect_is_cached(monkeypatch):
+    calls = []
+    monkeypatch.setattr(devices, "_probe", lambda: calls.append(1) or [])
+    devices._cache.clear()
+    devices.detect()
+    devices.detect()
+    assert len(calls) == 1

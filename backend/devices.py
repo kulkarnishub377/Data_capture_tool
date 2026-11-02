@@ -1,8 +1,17 @@
 """Compute-device detection, parsing and per-camera assignment."""
 
 
+_cache = {}
+
+
 def detect() -> list:
-    """Detected CUDA GPUs as [{id, name, memory_mb}]; empty without CUDA."""
+    """Detected CUDA GPUs as [{id, name, memory_mb}]; empty without CUDA. Cached (importing torch is slow)."""
+    if "gpus" not in _cache:
+        _cache["gpus"] = _probe()
+    return list(_cache["gpus"])
+
+
+def _probe() -> list:
     try:
         import torch
         if not torch.cuda.is_available():
