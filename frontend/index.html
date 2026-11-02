@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data Capture</title>
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">Data Capture</div>
+  <nav id="tabs">
+    <button data-tab="live" class="active">Live</button>
+    <button data-tab="roi">ROI</button>
+    <button data-tab="cameras">Cameras</button>
+    <button data-tab="gallery">Gallery</button>
+  </nav>
+  <div id="toast" role="status" aria-live="polite"></div>
+</header>
+
+<main>
+  <section id="tab-live" class="tab active">
+    <div class="bar" id="live-bar">
+      <label>Model <select id="sel-model"></select></label>
+      <label>Device <select id="sel-device"></select></label>
+      <label>Save <select id="sel-mode">
+        <option value="frame">Full frame</option>
+        <option value="crop">Crop</option>
+        <option value="both">Both</option>
+      </select></label>
+      <label>Metadata <select id="sel-meta">
+        <option value="false">Don't keep</option>
+        <option value="true">Keep (.json)</option>
+      </select></label>
+      <label>When <select id="sel-when">
+        <option value="first">First in ROI</option>
+        <option value="best">Best frame</option>
+      </select></label>
+      <span class="hint">Changes apply on next Start</span>
+    </div>
+    <div class="bar" id="class-bar"></div>
+    <div id="live-grid" class="grid"></div>
+    <p id="live-empty" class="empty" hidden>No cameras yet. Add one in the Cameras tab.</p>
+  </section>
+
+  <section id="tab-roi" class="tab">
+    <div class="bar">
+      <label>Camera <select id="roi-cam"></select></label>
+      <button id="roi-load">Load snapshot</button>
+      <button id="roi-undo">Undo</button>
+      <button id="roi-reset">Reset</button>
+      <button id="roi-save" class="primary" disabled>Save ROI</button>
+      <span class="hint" id="roi-hint">Click to add points. Drag a point to move it. Need at least 3 points.</span>
+    </div>
+    <div class="canvas-wrap"><canvas id="roi-canvas" width="960" height="540"></canvas></div>
+  </section>
+
+  <section id="tab-cameras" class="tab">
+    <form id="cam-form" class="bar">
+      <input id="cam-name" placeholder="Name (e.g. Cam-01)" required>
+      <input id="cam-url" placeholder="rtsp://user:pass@host:554/stream" required class="wide">
+      <input id="cam-device" placeholder="Device (optional, e.g. cuda:1)">
+      <button class="primary">Add camera</button>
+    </form>
+    <div id="cam-list" class="list"></div>
+  </section>
+
+  <section id="tab-gallery" class="tab">
+    <div class="bar">
+      <label>Camera <select id="g-cam"><option value="">All</option></select></label>
+      <label>Date <input type="date" id="g-date"></label>
+      <label>Class <select id="g-cls"><option value="">All</option></select></label>
+      <button id="g-refresh">Refresh</button>
+      <span class="hint" id="g-count"></span>
+    </div>
+    <div id="g-grid" class="thumbs"></div>
+    <div class="bar pager"><button id="g-prev">Prev</button><span id="g-page"></span><button id="g-next">Next</button></div>
+  </section>
+</main>
+
+<div id="lightbox" hidden>
+  <img id="lb-img" alt="">
+  <div class="lb-bar"><span id="lb-name"></span><button id="lb-del" class="danger">Delete</button><button id="lb-close">Close</button></div>
+</div>
+
+<script src="/static/js/app.js"></script>
+<script src="/static/js/live.js"></script>
+<script src="/static/js/roi.js"></script>
+<script src="/static/js/cameras.js"></script>
+<script src="/static/js/gallery.js"></script>
+</body>
+</html>
