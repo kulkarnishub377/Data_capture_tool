@@ -54,7 +54,7 @@ Requirements: Python 3.10+ (developed on 3.11/3.13), Windows or Linux. A GPU is 
 | **Live** | Settings summary; a camera toolbar with **Start all / Stop all** and a **Layout** selector (Auto, or 1-4 cameras per row, remembered); one live card per camera (video with ROI and detection boxes, status, counters, **full-screen** button, Start/Stop); and a **Recent captures** panel (the latest 10) with thumbnails + class tags. Click a thumbnail to enlarge or delete. |
 | **ROI** | Draw one or more polygons per camera on a fresh snapshot. A vehicle is captured when it is inside **any** ROI. |
 | **Cameras** | Add / enable / test / delete cameras. Passwords are masked in the UI. |
-| **Gallery** | Browse all captures with camera / date / class filters and paging. |
+| **Gallery** | Browse all captures: filter by camera (including removed cameras), date, image type and categories (tick several), search across all pages, sort, page size. Tick images (or **Select page**) and **Delete selected**; changing a filter clears the selection. Click an image for the viewer: arrow keys move, **Del** deletes, **Esc** closes. |
 | **Settings** | All model and capture options, grouped in sections. Nothing applies until you press **Save & restart**. |
 
 ### Settings (and what Save & restart does)
@@ -133,7 +133,7 @@ Data_capture_tool/
   backend/            Flask API, capture engine, dedup, storage, settings, devices, tests/
   frontend/           index.html + static/ (css, js, img, vendor/fontawesome)
   config.ini          settings (edited in place by the UI; comments are preserved)
-  data/               cameras.json (RTSP URLs - git-ignored), thumbs/ (thumbnail cache)
+  data/               cameras.json (RTSP URLs - git-ignored). Thumbnails are made on the fly, never stored.
   captures/           <camera>/<YYYY-MM-DD>/frame|crop/<camera>_<class>_<YYYYmmdd_HHMMSS_mmm>.jpg
   docs/               ARCHITECTURE.md, API.md
   AGENTS.md, llms.txt, llms-full.txt     for AI assistants

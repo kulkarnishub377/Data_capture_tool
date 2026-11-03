@@ -8,7 +8,7 @@ A compact index is in `llms.txt`; the whole documentation in one file is `llms-f
 - `backend/` Python: `app.py` (API), `capture_engine.py` (workers, detector), `capture_logic.py` (vehicle identity + buffer), `dedup.py`, `roi.py`,
   `storage.py`, `settings.py`, `devices.py`, `camera_io.py`, `tests/`.
 - `frontend/` static UI: `index.html`, `static/js/*.js`, `static/css/app.css`, `static/vendor/fontawesome/`.
-- `config.ini` (settings), `data/` (cameras.json, thumbs/), `captures/` (output). `data/`, `captures/`, models are git-ignored.
+- `config.ini` (settings), `data/` (cameras.json; thumbnails are never stored), `captures/` (output). `data/`, `captures/`, models are git-ignored.
 
 ## Run and test
 ```bash

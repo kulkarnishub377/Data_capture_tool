@@ -26,6 +26,7 @@ import storage  # noqa: E402
 from camera_io import CameraError, check_port, grab_frame, run_with_timeout  # noqa: E402,F401
 
 ROOT = Path(__file__).resolve().parent.parent
+MAX_BATCH_DELETE = 5000   # one gallery "Delete selected" request
 log = logging.getLogger("app")
 
 
@@ -39,8 +40,11 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
     frontend_dir = Path(frontend_dir or ROOT / "frontend")
     app = Flask(__name__, static_folder=str(frontend_dir / "static"), static_url_path="/static")
     store = storage.CameraStore(data_dir / "cameras.json")
+    # Shared state. Request threads, restart threads and MJPEG generators all touch it: every read and write of
+    # workers / carry / restarting / failed happens under `wlock`. Slow work (stopping a worker, loading a model)
+    # is never done while holding it, so status polling stays instant.
     workers, wlock = {}, threading.Lock()
-    names_cache = {}
+    names_cache, names_lock = {}, threading.Lock()   # names_lock: a model is loaded once, not once per request
     carry = {}         # cid -> counters of workers replaced by a restart (so the UI counts keep growing)
     restarting = set()  # cids whose worker is being replaced right now
     failed = {}        # cid -> why an automatic restart could not bring the camera back
@@ -51,6 +55,16 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
 
     def err(msg, code=400):
         return jsonify({"error": msg}), code
+
+    def int_arg(name, default, lo, hi):
+        """Integer query parameter clamped to [lo, hi]; ValueError (-> 400) when it is not a number."""
+        raw = request.args.get(name)
+        if raw in (None, ""):
+            return default
+        try:
+            return max(lo, min(hi, int(raw)))
+        except ValueError:
+            raise ValueError(f"{name} must be a number") from None
 
     def grab(url):
         """One frame for snapshot / test connection, decoded the way the capture workers will decode it."""
@@ -76,13 +90,14 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
         if problem:
             raise model_diag.ModelFileError(problem)
         key = (str(p), p.stat().st_mtime)
-        if key not in names_cache:
-            try:
-                names_cache[key] = names_loader(p)
-            except Exception as e:  # noqa: BLE001
-                log.exception("could not load model %s", p)
-                raise model_diag.ModelFileError(model_diag.explain_model_error(e)) from e
-        return names_cache[key]
+        with names_lock:                     # concurrent requests wait for the first load instead of repeating it
+            if key not in names_cache:
+                try:
+                    names_cache[key] = names_loader(p)
+                except Exception as e:  # noqa: BLE001
+                    log.exception("could not load model %s", p)
+                    raise model_diag.ModelFileError(model_diag.explain_model_error(e)) from e
+            return names_cache[key]
 
     def class_selection(c, names):
         """(classes to capture, warnings). Unknown configured names are reported, never silent."""
@@ -111,6 +126,10 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
         name, url = str(d.get("name", "")).strip(), str(d.get("url", "")).strip()
         if not name or not url:
             return err("name and url are required")
+        try:
+            url = camera_io.validate_camera_url(url)
+        except ValueError as e:
+            return err(str(e))
         return jsonify(public(store.add(name, url, device=d.get("device") or None)))
 
     @app.put("/api/cameras/<cid>")
@@ -119,6 +138,11 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
         fields = {k: d[k] for k in ("name", "url", "enabled", "device") if k in d}
         if "****" in str(fields.get("url", "")):
             fields.pop("url")  # a masked URL echoed back by a client must not overwrite the real one
+        if "url" in fields:
+            try:
+                fields["url"] = camera_io.validate_camera_url(fields["url"])
+            except ValueError as e:
+                return err(str(e))
         try:
             cam = store.update(cid, **fields)
         except KeyError:
@@ -134,10 +158,10 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
     def cameras_delete(cid):
         with wlock:
             w = workers.pop(cid, None)
+            carry.pop(cid, None)
+            failed.pop(cid, None)
         if w:
             w.stop()
-        carry.pop(cid, None)
-        failed.pop(cid, None)
         store.delete(cid)
         return jsonify({"ok": True})
 
@@ -313,14 +337,20 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
             if old:
                 old.stop()
             payload, code = start_worker(cid)
-            if code != 200:
-                failed[cid] = payload.get("error", "restart failed")
+            if code == 404:
+                why = None                   # the camera was deleted meanwhile: nothing to report
+            elif code != 200:
+                why = payload.get("error", "restart failed")
             elif payload.get("already_running"):
-                failed[cid] = "The previous capture is still shutting down - press Start again"
+                why = "The previous capture is still shutting down - press Start again"
+            else:
+                why = None
         except Exception as e:  # noqa: BLE001
             log.exception("restart failed")
-            failed[cid] = str(e)
-        finally:
+            why = str(e)
+        with wlock:
+            if why:
+                failed[cid] = why
             restarting.discard(cid)
 
     def restart_running():
@@ -377,19 +407,21 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
 
     @app.get("/api/capture/status")
     def capture_status():
-        with wlock:
+        with wlock:                          # one consistent view of the shared state
             snapshot = dict(workers)
+            carried = {k: dict(v) for k, v in carry.items()}
+            now_restarting, now_failed = set(restarting), dict(failed)
         out = {}
         for cid, w in snapshot.items():
             st = w.status()
-            b = carry.get(cid)
+            b = carried.get(cid)
             if b:
                 st["saved"] += b["saved"]
                 st["skipped"] += b["skipped"]
-            if cid in restarting:
+            if cid in now_restarting:
                 st["state"], st["message"] = "restarting", "applying new settings"
-            elif cid in failed and st["state"] in ("stopped", "error"):
-                st["state"], st["message"] = "error", failed[cid]
+            elif cid in now_failed and st["state"] in ("stopped", "error"):
+                st["state"], st["message"] = "error", now_failed[cid]
             out[cid] = st
         return jsonify(out)
 
@@ -404,14 +436,15 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
             while True:
                 with wlock:
                     w = workers.get(cid)   # re-read each loop: the stream survives a restart
+                    swapping = cid in restarting
                 if w is None:
                     return
                 jpg = w.latest_jpeg()
                 if jpg is not None and jpg is not last:
                     last = jpg
                     yield b"--frame%sContent-Type: image/jpeg%s%s" % (b"\r\n", b"\r\n\r\n", jpg) + b"\r\n"
-                elif w.status()["state"] == "stopped" and cid not in restarting:
-                    return
+                elif w.status()["state"] in ("stopped", "error") and not swapping:
+                    return                 # end the response so this server thread is freed
                 time.sleep(0.08)
 
         return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
@@ -420,10 +453,14 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
     @app.get("/api/captures")
     def captures_list():
         a = request.args
+        try:
+            page, per_page = int_arg("page", 1, 1, 10 ** 6), int_arg("per_page", 60, 1, 200)
+        except ValueError as e:
+            return err(str(e))
         return jsonify(storage.list_captures(
             cfg()["OUTPUT_DIR"], camera=a.get("camera") or None, date=a.get("date") or None,
-            cls=a.get("class") or None, page=max(1, int(a.get("page", 1) or 1)),
-            per_page=min(200, int(a.get("per_page", 60) or 60))))
+            cls=a.get("class") or None, kind=a.get("kind") or None, sort=a.get("sort") or "newest",
+            page=page, per_page=per_page, q=a.get("q") or None))
 
     @app.get("/api/captures/<path:rel>")
     def captures_get(rel):
@@ -445,25 +482,36 @@ def create_app(config_path=None, data_dir=None, frontend_dir=None,
             return err("not found", 404)
         return jsonify({"ok": True})
 
+    @app.post("/api/captures/delete-batch")
+    def captures_delete_batch():
+        d = request.get_json(silent=True) or {}
+        paths = d.get("paths", [])
+        if not isinstance(paths, list):
+            return err("paths must be a list of file paths")
+        if len(paths) > MAX_BATCH_DELETE:
+            return err(f"At most {MAX_BATCH_DELETE} images can be deleted in one request")
+        deleted, errors = storage.delete_captures_batch(cfg()["OUTPUT_DIR"], paths)
+        return jsonify({"ok": True, "deleted": deleted, "errors": errors})
+
     @app.get("/api/recent")
     def recent():
         try:
-            limit = min(100, max(1, int(request.args.get("limit", 10))))
-        except ValueError:
-            return err("limit must be a number")
+            limit = int_arg("limit", 10, 1, 100)
+        except ValueError as e:
+            return err(str(e))
         return jsonify({"items": storage.recent_captures(cfg()["OUTPUT_DIR"], limit)})
 
     @app.get("/api/thumb/<path:rel>")
     def thumb(rel):
+        """Thumbnail made in memory for each request (nothing is stored on the server); the browser may cache it."""
         try:
-            p = storage.make_thumbnail(cfg()["OUTPUT_DIR"], rel, data_dir / "thumbs",
-                                       int(request.args.get("w", 320)))
+            jpg = storage.make_thumbnail(cfg()["OUTPUT_DIR"], rel, int_arg("w", 320, 32, 1280))
         except ValueError as e:
             return err(str(e))
         except FileNotFoundError:
             abort(404)
-        r = send_file(p, mimetype="image/jpeg")
-        r.headers["Cache-Control"] = "public, max-age=3600"
+        r = Response(jpg, mimetype="image/jpeg")
+        r.headers["Cache-Control"] = "private, max-age=3600"
         return r
 
     app.workers = workers

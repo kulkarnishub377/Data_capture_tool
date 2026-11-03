@@ -65,15 +65,14 @@ class YoloDetector:
             res = self.model.track(crop, persist=True, tracker=TRACKER_CFG, conf=self.conf,
                                    imgsz=self.imgsz, device=self.device, classes=self.class_ids,
                                    agnostic_nms=True, verbose=False, **kwargs)[0]
-        boxes = res.boxes
-        if boxes is None or boxes.id is None:
-            return []
-        out = []
-        for b, tid, cls, cf in zip(boxes.xyxy.cpu().numpy(), boxes.id.int().cpu().tolist(),
-                                   boxes.cls.int().cpu().tolist(), boxes.conf.cpu().tolist()):
-            out.append(Detection(tid, self.names[cls], float(cf),
-                                 (b[0] + x1, b[1] + y1, b[2] + x1, b[3] + y1)))
-        return out
+            boxes = res.boxes
+            if boxes is None or boxes.id is None:
+                return []
+            # .cpu() on a CUDA tensor is a device copy: it must not run while another thread captures a CUDA graph
+            rows = list(zip(boxes.xyxy.cpu().numpy(), boxes.id.int().cpu().tolist(),
+                            boxes.cls.int().cpu().tolist(), boxes.conf.cpu().tolist()))
+        return [Detection(tid, self.names[cls], float(cf), (b[0] + x1, b[1] + y1, b[2] + x1, b[3] + y1))
+                for b, tid, cls, cf in rows]
 
 
 def load_model_names(model_path) -> dict:
@@ -109,28 +108,45 @@ class LatestFrameReader:
         self._stop = False
         self.failed = False
         self._thread = None
+        self._release_on_exit = False      # set by close() when a read is still blocked
+        self._released = False
+        self._exited = False
 
     def start(self):
-        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread = threading.Thread(target=self._loop, daemon=True, name="frame-reader")
         self._thread.start()
 
     def _loop(self):
         fails = 0
-        while not self._stop:
-            ok, frame = self._cap.read()
-            if not ok or frame is None:
-                fails += 1
-                if fails > 30:
-                    with self._cond:
-                        self.failed = True
-                        self._cond.notify_all()
-                    return
-                time.sleep(0.02)
-                continue
-            fails = 0
-            with self._cond:
-                self._frame, self._idx = frame, self._idx + 1
-                self._cond.notify_all()
+        try:
+            while not self._stop:
+                ok, frame = self._cap.read()
+                if not ok or frame is None:
+                    fails += 1
+                    if fails > 30:
+                        with self._cond:
+                            self.failed = True
+                            self._cond.notify_all()
+                        return
+                    time.sleep(0.02)
+                    continue
+                fails = 0
+                with self._cond:
+                    self._frame, self._idx = frame, self._idx + 1
+                    self._cond.notify_all()
+        finally:
+            with self._cond:               # decided under the lock, so close() and this thread never both skip it
+                self._exited = True
+                late = self._release_on_exit
+            if late:
+                self._release()
+
+    def _release(self):
+        with self._cond:
+            if self._released:
+                return
+            self._released = True
+        self._cap.release()
 
     def get(self, timeout=1.0):
         """Newest frame not yet returned, or None on timeout / stream failure."""
@@ -141,15 +157,35 @@ class LatestFrameReader:
                 return self._frame
             return None
 
-    def stop(self):
-        self._stop = True
+    def close(self, timeout=None):
+        """Stop reading and release the capture.
+
+        Releasing a cv2.VideoCapture while another thread is inside read() can crash the process (FFmpeg/GStreamer
+        free the buffers under it). If the read is still blocked after `timeout`, the reader thread releases the
+        capture itself the moment that read returns."""
         with self._cond:
+            self._stop = True
             self._cond.notify_all()
         if self._thread:
-            self._thread.join(timeout=camera_io.READ_TIMEOUT_MS / 1000 + 1)
+            self._thread.join(timeout=camera_io.READ_TIMEOUT_MS / 1000 + 1 if timeout is None else timeout)
+        with self._cond:
+            still_reading = self._thread is not None and not self._exited
+            if still_reading:
+                self._release_on_exit = True
+        if still_reading:
+            log.warning("stream read still blocked - the capture is released when it returns")
+        else:
+            self._release()
+
+    stop = close
 
 
 class CameraWorker:
+    """One camera: a capture thread (open/reconnect + detect loop), a reader thread per open stream, a saver thread.
+
+    Everything read by other threads (state, counters, preview) is guarded by `self._lock`."""
+    PREVIEW_IDLE_S = 3.0    # stop encoding the preview this long after the last viewer asked for it
+
     def __init__(self, camera, cfg, device, source=None, classes=None, model_name="",
                  detector=None):
         self.camera, self.cfg, self.device = camera, cfg, device
@@ -168,6 +204,7 @@ class CameraWorker:
         self._backend = None            # "gstreamer" | "ffmpeg" | "file" once a stream is open
         self._logic = None
         self._jpeg = None
+        self._watched_at = float("-inf")
         self._is_file = Path(str(self.source)).is_file()
 
     # ---- public -----------------------------------------------------------
@@ -196,7 +233,9 @@ class CameraWorker:
                     "device": self.device, "backend": self._backend}
 
     def latest_jpeg(self):
+        """Newest preview JPEG (None until one is ready). Calling it marks the preview as watched."""
         with self._lock:
+            self._watched_at = time.monotonic()
             return self._jpeg
 
     # ---- internals --------------------------------------------------------
@@ -232,10 +271,10 @@ class CameraWorker:
                     backoff = min(backoff * 2, 15)
                     continue
                 backoff = 1.0
-                self._backend = opened.backend
+                with self._lock:
+                    self._backend = opened.backend
                 log.info("[%s] stream opened with %s", self.camera["name"], opened.backend)
-                ended = self._loop(cap)
-                cap.release()
+                ended = self._loop(cap)             # owns `cap` and always releases it
                 if ended and self._is_file:
                     break
                 if not self._stop.is_set():
@@ -243,14 +282,22 @@ class CameraWorker:
                     self._stop.wait(1.0)
         except Exception as e:  # noqa: BLE001 - surface in UI, never crash the app
             log.exception("worker failed")
+            self._flush()       # vehicles already buffered are still saved
             self._set("error", model_diag.explain_model_error(e))
-            self._stop.set()    # lets the saver thread finish; Start will build a fresh worker
+            self._stop.set()    # the saver writes what is queued, then exits; Start builds a fresh worker
             return
-        if self._logic:
-            for r in self._logic.flush(time.time()):
-                self._enqueue(r)
+        self._flush()
         self._drain()
         self._set("stopped", "")
+
+    def _flush(self):
+        if not self._logic:
+            return
+        try:
+            for r in self._logic.flush(time.time()):
+                self._enqueue(r)
+        except Exception:  # noqa: BLE001 - a broken buffer must not hide the original error
+            log.exception("[%s] flushing buffered captures failed", self.camera["name"])
 
     def _loop(self, cap) -> bool:
         """Process frames until the stream ends/drops. Returns True on clean end of a file."""
@@ -281,9 +328,18 @@ class CameraWorker:
             return False
         finally:
             if reader:
-                reader.stop()
+                reader.close()      # releases cap once no read() is running
+            else:
+                cap.release()
 
     def _preview(self, frame, dets):
+        """Annotated JPEG for the live view - only while a browser is actually watching (it costs CPU per frame)."""
+        with self._lock:
+            watched = time.monotonic() - self._watched_at < self.PREVIEW_IDLE_S
+            if not watched:
+                self._jpeg = None   # the next viewer must not see an old picture
+        if not watched:
+            return
         img = frame.copy()
         for pg in roi.as_polygons(self.camera["rois"]):
             cv2.polylines(img, [np.array(pg, np.int32)], True, (0, 255, 255), 2)
@@ -335,4 +391,5 @@ class CameraWorker:
                     self._saved += 1
             except Exception as e:  # noqa: BLE001
                 log.error("save failed: %s", e)
-                self._set(self._state, f"save failed: {e}")
+                with self._lock:
+                    self._message = f"save failed: {e}"

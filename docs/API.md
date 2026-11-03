@@ -7,8 +7,8 @@ Camera objects returned by the API have the RTSP password replaced by `****`.
 | Method & path | Body / query | Result |
 |---|---|---|
 | `GET /api/cameras` | | list of cameras `{id,name,url(masked),enabled,rois,frame_size,device}` |
-| `POST /api/cameras` | `{name,url,device?}` | the new camera (400 if name/url empty) |
-| `PUT /api/cameras/<id>` | any of `{name,url,enabled,device}` | camera. `enabled:false` stops its worker. A masked URL (`****`) is ignored. |
+| `POST /api/cameras` | `{name,url,device?}` | the new camera (400 if name/url empty, or the URL is neither an rtsp/rtsps/http/https/rtmp URL with a host nor an existing video file) |
+| `PUT /api/cameras/<id>` | any of `{name,url,enabled,device}` | camera. `enabled:false` stops its worker. A masked URL (`****`) is ignored; an invalid URL gives 400. |
 | `DELETE /api/cameras/<id>` | | `{ok}` (stops its worker; images are kept) |
 | `POST /api/cameras/<id>/test` | | `{ok:true,size:[w,h]}` or `{ok:false,error}` (<= ~15 s) |
 | `GET /api/cameras/<id>/snapshot` | | JPEG with header `X-Frame-Size: WxH`; 502 + reason if unreachable |
@@ -39,10 +39,11 @@ Camera objects returned by the API have the RTSP password replaced by `****`.
 ## Captured images
 | Method & path | Notes |
 |---|---|
-| `GET /api/captures?camera=&date=&class=&page=&per_page=` | `{total,page,per_page,items:[{path,camera,date,kind,class,name,ts}]}`, newest first (`per_page` <= 200) |
+| `GET /api/captures?camera=&date=&class=&kind=&sort=&q=&page=&per_page=` | `{total,page,per_page,items:[{path,camera,date,kind,class,name,ts}],categories:[...],cameras:[...],dates:[...]}`. `sort` = `newest` (default) or `oldest`; `kind` = `frame` / `crop`; `class` = one or comma-separated classes; `q` = case-insensitive search of name, camera, class and time over all pages; `camera` = a camera folder name from `cameras`. `categories`/`cameras`/`dates` list everything on disk (for the filter controls). `per_page` <= 200; a non-number gives 400. |
 | `GET /api/captures/<path>` | the JPEG. `path` is `items[].path`. |
 | `DELETE /api/captures/<path>` | deletes the image and its `.json` |
+| `POST /api/captures/delete-batch` | `{paths:[...]}` (at most 5000) -> `{ok:true,deleted:n,errors:["path: reason", ...]}`. Deletes each image and its `.json`; a bad or missing entry is reported in `errors` and never stops the rest. |
 | `GET /api/recent?limit=10` | `{items:[...]}` newest across cameras, one per vehicle (crop preferred); default and UI use the latest 10 (max 100). Fast (reads newest date folders only). |
-| `GET /api/thumb/<path>?w=320` | cached JPEG thumbnail (`w` 32 - 1280), `Cache-Control: max-age=3600` |
+| `GET /api/thumb/<path>?w=320` | JPEG thumbnail (`w` 32 - 1280) made in memory for each request - nothing is stored on the server (the browser may cache it: `Cache-Control: private, max-age=3600`); 404 if the image is gone |
 
 `ts` is local time `YYYY-MM-DD HH:MM:SS`. Invalid / escaping paths return 400 or 404.

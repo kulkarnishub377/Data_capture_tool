@@ -34,7 +34,7 @@ async function api(path, opts = {}) {
   const data = ct.includes("json") ? await res.json() : null;
   if (!res.ok) {
     const msg = (data && data.error) || `Request failed (${res.status})`;
-    toast(msg, true);
+    if (!opts.quiet) toast(msg, true);       // quiet: optional background lookups must not alarm the user
     throw new Error(msg);
   }
   return opts.raw ? res : data;
@@ -73,30 +73,152 @@ function timeAgo(ts) {
   return ts.slice(0, 16);
 }
 
-/* Debounce: many quick changes (e.g. ticking several classes) -> one request -> one camera restart. */
+/* Debounce: many quick changes -> one request */
 function debounce(fn, ms) {
   let t;
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 }
 
-/* Shared full-size viewer for Live "recent" and the Gallery. */
-let lbItem = null, lbOnDeleted = null;
-function openLightbox(item, onDeleted) {
-  lbItem = item; lbOnDeleted = onDeleted || null;
-  $("#lb-img").src = "/api/captures/" + item.path;
-  $("#lb-name").textContent = `${item.camera} | ${item.class} | ${item.ts || item.name}`;
-  $("#lightbox").hidden = false;
+/* Shared full-size viewer with Next / Previous & Keyboard Navigation */
+let lbItems = [];
+let lbIndex = -1;
+let lbOnDeleted = null;
+
+function renderLightboxCurrent() {
+  if (lbIndex < 0 || lbIndex >= lbItems.length) {
+    closeLightbox();
+    return;
+  }
+  const item = lbItems[lbIndex];
+  const img = $("#lb-img");
+  img.src = "/api/captures/" + item.path;
+  img.alt = item.name || "Capture";
+
+  const nameEl = $("#lb-name");
+  if (nameEl) nameEl.textContent = item.ts ? `${item.ts} (${item.name})` : item.name;
+
+  const countEl = $("#lb-counter");
+  if (countEl) countEl.textContent = `${lbIndex + 1} / ${lbItems.length}`;
+
+  const camEl = $("#lb-camera");
+  if (camEl) camEl.textContent = item.camera || "Camera";
+
+  const clsEl = $("#lb-class");
+  if (clsEl) clsEl.textContent = (item.class || "Vehicle").replace(/_/g, " ");
+
+  const kindEl = $("#lb-kind");
+  if (kindEl) {
+    kindEl.textContent = item.kind ? (item.kind === "crop" ? "Crop" : "Full frame") : "";
+    kindEl.hidden = !item.kind;
+  }
+
+  const fullLink = $("#lb-full");
+  if (fullLink) fullLink.href = "/api/captures/" + item.path;
+
+  const prevBtn = $("#lb-prev");
+  if (prevBtn) prevBtn.disabled = lbIndex <= 0;
+
+  const nextBtn = $("#lb-next");
+  if (nextBtn) nextBtn.disabled = lbIndex >= lbItems.length - 1;
 }
-function closeLightbox() { $("#lightbox").hidden = true; lbItem = null; $("#lb-img").removeAttribute("src"); }
-$("#lb-close").addEventListener("click", closeLightbox);
-$("#lightbox").addEventListener("click", e => { if (e.target.id === "lightbox") closeLightbox(); });
-document.addEventListener("keydown", e => { if (e.key === "Escape") closeLightbox(); });
-$("#lb-del").addEventListener("click", async () => {
-  if (!lbItem || !confirm("Delete this image?")) return;
+
+function openLightbox(item, onDeleted, list = null, index = -1) {
+  lbOnDeleted = onDeleted || null;
+  if (Array.isArray(list) && list.length > 0) {
+    lbItems = list.slice();
+    lbIndex = index >= 0 ? index : lbItems.findIndex(x => x.path === item.path);
+    if (lbIndex < 0) lbIndex = 0;
+  } else {
+    lbItems = [item];
+    lbIndex = 0;
+  }
+  renderLightboxCurrent();
+  $("#lightbox").hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function closeLightbox() {
+  const lb = $("#lightbox");
+  if (lb) lb.hidden = true;
+  lbItems = [];
+  lbIndex = -1;
+  const img = $("#lb-img");
+  if (img) img.removeAttribute("src");
+  document.body.style.overflow = "";
+}
+
+function lbPrev() {
+  if (lbIndex > 0) {
+    lbIndex--;
+    renderLightboxCurrent();
+  }
+}
+
+function lbNext() {
+  if (lbIndex < lbItems.length - 1) {
+    lbIndex++;
+    renderLightboxCurrent();
+  }
+}
+
+async function lbDelete() {
+  if (lbIndex < 0 || lbIndex >= lbItems.length) return;
+  const item = lbItems[lbIndex];
+  if (!confirm(`Delete capture "${item.name}"?`)) return;
   try {
-    await api("/captures/" + lbItem.path, { method: "DELETE" });
-    const cb = lbOnDeleted; closeLightbox(); if (cb) cb();
+    await api("/captures/" + item.path, { method: "DELETE" });
+    toast("Image deleted");
+    const cb = lbOnDeleted;
+    lbItems.splice(lbIndex, 1);
+    if (lbItems.length === 0) {
+      closeLightbox();
+    } else {
+      if (lbIndex >= lbItems.length) lbIndex = lbItems.length - 1;
+      renderLightboxCurrent();
+    }
+    if (cb) cb(item);
   } catch (e) { /* toast shown */ }
+}
+
+const lbCloseBtn = $("#lb-close");
+if (lbCloseBtn) lbCloseBtn.addEventListener("click", closeLightbox);
+
+const lbPrevBtn = $("#lb-prev");
+if (lbPrevBtn) lbPrevBtn.addEventListener("click", lbPrev);
+
+const lbNextBtn = $("#lb-next");
+if (lbNextBtn) lbNextBtn.addEventListener("click", lbNext);
+
+const lbDelBtn = $("#lb-del");
+if (lbDelBtn) lbDelBtn.addEventListener("click", lbDelete);
+
+const lbEl = $("#lightbox");
+if (lbEl) {
+  lbEl.addEventListener("click", e => {
+    if (e.target.id === "lightbox" || e.target.classList.contains("lb-stage")) {
+      closeLightbox();
+    }
+  });
+}
+
+document.addEventListener("keydown", e => {
+  const lb = $("#lightbox");
+  if (!lb || lb.hidden) return;
+  if (e.key === "Escape") {
+    e.preventDefault();
+    closeLightbox();
+  } else if (e.key === "ArrowLeft") {
+    e.preventDefault();
+    lbPrev();
+  } else if (e.key === "ArrowRight") {
+    e.preventDefault();
+    lbNext();
+  } else if (e.key === "Delete" || e.key === "Backspace") {
+    if (!["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) {
+      e.preventDefault();
+      lbDelete();
+    }
+  }
 });
 
 let camerasCache = [];
@@ -106,7 +228,7 @@ async function loadCameras() {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  let t = location.hash.slice(1) || "live";     // deep link: /#settings
+  let t = location.hash.slice(1) || "live";
   if (!location.hash) { try { t = localStorage.getItem("tab") || "live"; } catch (e) { /* ignore */ } }
   showTab(tabs[t] ? t : "live");
 });

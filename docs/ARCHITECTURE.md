@@ -7,7 +7,7 @@ inside that process. There is no database: state is JSON files, image files and 
 Browser (frontend/)  <--HTTP/JSON, MJPEG-->  Flask app (backend/app.py)
                                                |-- CameraStore  -> data/cameras.json
                                                |-- settings     -> config.ini (edited in place)
-                                               |-- storage      -> captures/**.jpg (+ .json), data/thumbs/
+                                               |-- storage      -> captures/**.jpg (+ .json); thumbnails in memory only
                                                '-- CameraWorker (one per running camera)
                                                      |-- LatestFrameReader thread  (RTSP -> newest frame)
                                                      |-- detect loop: YoloDetector + CaptureLogic
@@ -23,7 +23,7 @@ Browser (frontend/)  <--HTTP/JSON, MJPEG-->  Flask app (backend/app.py)
 | `capture_engine.py` | `YoloDetector` (YOLO + ByteTrack via `trackers/bytetrack_vehicle.yaml`, class-agnostic NMS), `LatestFrameReader`, `CameraWorker` (threads, reconnect, preview JPEG), `default_classes`, `load_model_names`. |
 | `dedup.py` | `iou`, `same_object` (one object boxed twice), `phash`. |
 | `roi.py` | Polygon helpers: `point_in_polygon`, `box_overlap_ratio` (cached mask), `make_mask`, `expand_bbox`, `polygon_bbox`, `as_polygons`. Accept one polygon or a list. |
-| `storage.py` | `CameraStore` (atomic JSON, migrates old single `roi` -> `rois`), `save_capture`, `list_captures`, `recent_captures`, `make_thumbnail`, `safe_capture_path`, `delete_capture`, `mask_url`. |
+| `storage.py` | `CameraStore` (atomic JSON, migrates old single `roi` -> `rois`), `save_capture`, `list_captures`, `recent_captures`, `make_thumbnail` (in memory, reduced-size JPEG decode, never written to disk), `safe_capture_path`, `delete_capture`, `mask_url`. |
 | `settings.py` | `load` / `save` for `config.ini`: typed values, defaults, choice + range validation, line-preserving writes. |
 | `devices.py` | `detect` (cached GPU probe), `resolve` (parse `DEVICE`, fall back with warnings), `assign` (round-robin cameras over devices). |
 | `model_diag.py` | `model_file_problem` (missing / empty / Git LFS pointer / truncated), `explain_model_error` (adds a plain-language hint to load errors), `MODEL_EXTS`. |
@@ -84,9 +84,19 @@ Class names may contain underscores (`auto_rickshaw`); the camera comes from the
 
 ## Threading and safety notes
 
-- `wlock` guards the `workers` dict; `CameraStore` has an `RLock` and writes via temp file + `os.replace`.
+- `wlock` guards all shared app state (`workers`, `carry`, `restarting`, `failed`); slow work (stopping a worker,
+  loading a model) is never done while holding it. `names_lock` makes concurrent requests share one model load.
+  `CameraStore` has an `RLock` and writes via temp file + `os.replace`.
+- Inside a worker, `self._lock` guards everything other threads read (state, counters, backend, preview JPEG).
 - `CameraWorker.stop()` sets the stop event, joins threads (<= 10 s each) and only then reports `stopped`.
-- A worker exception sets state `error`, sets the stop event (so the saver exits) and `start` replaces it.
+- A worker exception flushes the vehicles already buffered (they are still saved), sets state `error`, sets the
+  stop event (the saver writes what is queued, then exits) and `start` replaces it.
+- The open stream is always released (`_loop` owns it). `LatestFrameReader.close()` never releases a capture while a
+  `read()` is still running in the reader thread (that can crash FFmpeg/GStreamer); a blocked reader releases it itself.
+- All GPU work, including the `.cpu()` copies of result tensors, runs inside `gpu_lock.guard(device)`.
+- The preview JPEG is only encoded while a browser is watching (`latest_jpeg()` calls in the last 3 s). The MJPEG
+  stream ends when the worker is `stopped` or `error`, so no server thread is held forever.
+- Query numbers (`page`, `per_page`, `limit`, `w`) are clamped; a non-number gives 400, never 500.
 - Path traversal: all capture/thumbnail paths go through `storage.safe_capture_path` (rejects `..`, backslashes,
   absolute and drive paths; only `.jpg`).
 - The service binds `HOST` (default `0.0.0.0`) on `PORT` from `config.ini` and has no authentication: run it on a trusted network.

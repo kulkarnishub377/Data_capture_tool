@@ -64,7 +64,7 @@ Requirements: Python 3.10+ (developed on 3.11/3.13), Windows or Linux. A GPU is 
 | **Live** | Settings summary; a camera toolbar with **Start all / Stop all** and a **Layout** selector (Auto, or 1-4 cameras per row, remembered); one live card per camera (video with ROI and detection boxes, status, counters, **full-screen** button, Start/Stop); and a **Recent captures** panel (the latest 10) with thumbnails + class tags. Click a thumbnail to enlarge or delete. |
 | **ROI** | Draw one or more polygons per camera on a fresh snapshot. A vehicle is captured when it is inside **any** ROI. |
 | **Cameras** | Add / enable / test / delete cameras. Passwords are masked in the UI. |
-| **Gallery** | Browse all captures with camera / date / class filters and paging. |
+| **Gallery** | Browse all captures: filter by camera (including removed cameras), date, image type and categories (tick several), search across all pages, sort, page size. Tick images (or **Select page**) and **Delete selected**; changing a filter clears the selection. Click an image for the viewer: arrow keys move, **Del** deletes, **Esc** closes. |
 | **Settings** | All model and capture options, grouped in sections. Nothing applies until you press **Save & restart**. |
 
 ### Settings (and what Save & restart does)
@@ -143,7 +143,7 @@ Data_capture_tool/
   backend/            Flask API, capture engine, dedup, storage, settings, devices, tests/
   frontend/           index.html + static/ (css, js, img, vendor/fontawesome)
   config.ini          settings (edited in place by the UI; comments are preserved)
-  data/               cameras.json (RTSP URLs - git-ignored), thumbs/ (thumbnail cache)
+  data/               cameras.json (RTSP URLs - git-ignored). Thumbnails are made on the fly, never stored.
   captures/           <camera>/<YYYY-MM-DD>/frame|crop/<camera>_<class>_<YYYYmmdd_HHMMSS_mmm>.jpg
   docs/               ARCHITECTURE.md, API.md
   AGENTS.md, llms.txt, llms-full.txt     for AI assistants
@@ -282,7 +282,7 @@ inside that process. There is no database: state is JSON files, image files and 
 Browser (frontend/)  <--HTTP/JSON, MJPEG-->  Flask app (backend/app.py)
                                                |-- CameraStore  -> data/cameras.json
                                                |-- settings     -> config.ini (edited in place)
-                                               |-- storage      -> captures/**.jpg (+ .json), data/thumbs/
+                                               |-- storage      -> captures/**.jpg (+ .json); thumbnails in memory only
                                                '-- CameraWorker (one per running camera)
                                                      |-- LatestFrameReader thread  (RTSP -> newest frame)
                                                      |-- detect loop: YoloDetector + CaptureLogic
@@ -298,7 +298,7 @@ Browser (frontend/)  <--HTTP/JSON, MJPEG-->  Flask app (backend/app.py)
 | `capture_engine.py` | `YoloDetector` (YOLO + ByteTrack via `trackers/bytetrack_vehicle.yaml`, class-agnostic NMS), `LatestFrameReader`, `CameraWorker` (threads, reconnect, preview JPEG), `default_classes`, `load_model_names`. |
 | `dedup.py` | `iou`, `same_object` (one object boxed twice), `phash`. |
 | `roi.py` | Polygon helpers: `point_in_polygon`, `box_overlap_ratio` (cached mask), `make_mask`, `expand_bbox`, `polygon_bbox`, `as_polygons`. Accept one polygon or a list. |
-| `storage.py` | `CameraStore` (atomic JSON, migrates old single `roi` -> `rois`), `save_capture`, `list_captures`, `recent_captures`, `make_thumbnail`, `safe_capture_path`, `delete_capture`, `mask_url`. |
+| `storage.py` | `CameraStore` (atomic JSON, migrates old single `roi` -> `rois`), `save_capture`, `list_captures`, `recent_captures`, `make_thumbnail` (in memory, reduced-size JPEG decode, never written to disk), `safe_capture_path`, `delete_capture`, `mask_url`. |
 | `settings.py` | `load` / `save` for `config.ini`: typed values, defaults, choice + range validation, line-preserving writes. |
 | `devices.py` | `detect` (cached GPU probe), `resolve` (parse `DEVICE`, fall back with warnings), `assign` (round-robin cameras over devices). |
 | `model_diag.py` | `model_file_problem` (missing / empty / Git LFS pointer / truncated), `explain_model_error` (adds a plain-language hint to load errors), `MODEL_EXTS`. |
@@ -359,9 +359,19 @@ Class names may contain underscores (`auto_rickshaw`); the camera comes from the
 
 ## Threading and safety notes
 
-- `wlock` guards the `workers` dict; `CameraStore` has an `RLock` and writes via temp file + `os.replace`.
+- `wlock` guards all shared app state (`workers`, `carry`, `restarting`, `failed`); slow work (stopping a worker,
+  loading a model) is never done while holding it. `names_lock` makes concurrent requests share one model load.
+  `CameraStore` has an `RLock` and writes via temp file + `os.replace`.
+- Inside a worker, `self._lock` guards everything other threads read (state, counters, backend, preview JPEG).
 - `CameraWorker.stop()` sets the stop event, joins threads (<= 10 s each) and only then reports `stopped`.
-- A worker exception sets state `error`, sets the stop event (so the saver exits) and `start` replaces it.
+- A worker exception flushes the vehicles already buffered (they are still saved), sets state `error`, sets the
+  stop event (the saver writes what is queued, then exits) and `start` replaces it.
+- The open stream is always released (`_loop` owns it). `LatestFrameReader.close()` never releases a capture while a
+  `read()` is still running in the reader thread (that can crash FFmpeg/GStreamer); a blocked reader releases it itself.
+- All GPU work, including the `.cpu()` copies of result tensors, runs inside `gpu_lock.guard(device)`.
+- The preview JPEG is only encoded while a browser is watching (`latest_jpeg()` calls in the last 3 s). The MJPEG
+  stream ends when the worker is `stopped` or `error`, so no server thread is held forever.
+- Query numbers (`page`, `per_page`, `limit`, `w`) are clamped; a non-number gives 400, never 500.
 - Path traversal: all capture/thumbnail paths go through `storage.safe_capture_path` (rejects `..`, backslashes,
   absolute and drive paths; only `.jpg`).
 - The service binds `HOST` (default `0.0.0.0`) on `PORT` from `config.ini` and has no authentication: run it on a trusted network.
@@ -382,8 +392,8 @@ Camera objects returned by the API have the RTSP password replaced by `****`.
 | Method & path | Body / query | Result |
 |---|---|---|
 | `GET /api/cameras` | | list of cameras `{id,name,url(masked),enabled,rois,frame_size,device}` |
-| `POST /api/cameras` | `{name,url,device?}` | the new camera (400 if name/url empty) |
-| `PUT /api/cameras/<id>` | any of `{name,url,enabled,device}` | camera. `enabled:false` stops its worker. A masked URL (`****`) is ignored. |
+| `POST /api/cameras` | `{name,url,device?}` | the new camera (400 if name/url empty, or the URL is neither an rtsp/rtsps/http/https/rtmp URL with a host nor an existing video file) |
+| `PUT /api/cameras/<id>` | any of `{name,url,enabled,device}` | camera. `enabled:false` stops its worker. A masked URL (`****`) is ignored; an invalid URL gives 400. |
 | `DELETE /api/cameras/<id>` | | `{ok}` (stops its worker; images are kept) |
 | `POST /api/cameras/<id>/test` | | `{ok:true,size:[w,h]}` or `{ok:false,error}` (<= ~15 s) |
 | `GET /api/cameras/<id>/snapshot` | | JPEG with header `X-Frame-Size: WxH`; 502 + reason if unreachable |
@@ -414,11 +424,12 @@ Camera objects returned by the API have the RTSP password replaced by `****`.
 ## Captured images
 | Method & path | Notes |
 |---|---|
-| `GET /api/captures?camera=&date=&class=&page=&per_page=` | `{total,page,per_page,items:[{path,camera,date,kind,class,name,ts}]}`, newest first (`per_page` <= 200) |
+| `GET /api/captures?camera=&date=&class=&kind=&sort=&q=&page=&per_page=` | `{total,page,per_page,items:[{path,camera,date,kind,class,name,ts}],categories:[...],cameras:[...],dates:[...]}`. `sort` = `newest` (default) or `oldest`; `kind` = `frame` / `crop`; `class` = one or comma-separated classes; `q` = case-insensitive search of name, camera, class and time over all pages; `camera` = a camera folder name from `cameras`. `categories`/`cameras`/`dates` list everything on disk (for the filter controls). `per_page` <= 200; a non-number gives 400. |
 | `GET /api/captures/<path>` | the JPEG. `path` is `items[].path`. |
 | `DELETE /api/captures/<path>` | deletes the image and its `.json` |
+| `POST /api/captures/delete-batch` | `{paths:[...]}` (at most 5000) -> `{ok:true,deleted:n,errors:["path: reason", ...]}`. Deletes each image and its `.json`; a bad or missing entry is reported in `errors` and never stops the rest. |
 | `GET /api/recent?limit=10` | `{items:[...]}` newest across cameras, one per vehicle (crop preferred); default and UI use the latest 10 (max 100). Fast (reads newest date folders only). |
-| `GET /api/thumb/<path>?w=320` | cached JPEG thumbnail (`w` 32 - 1280), `Cache-Control: max-age=3600` |
+| `GET /api/thumb/<path>?w=320` | JPEG thumbnail (`w` 32 - 1280) made in memory for each request - nothing is stored on the server (the browser may cache it: `Cache-Control: private, max-age=3600`); 404 if the image is gone |
 
 `ts` is local time `YYYY-MM-DD HH:MM:SS`. Invalid / escaping paths return 400 or 404.
 
@@ -532,7 +543,7 @@ A compact index is in `llms.txt`; the whole documentation in one file is `llms-f
 - `backend/` Python: `app.py` (API), `capture_engine.py` (workers, detector), `capture_logic.py` (vehicle identity + buffer), `dedup.py`, `roi.py`,
   `storage.py`, `settings.py`, `devices.py`, `camera_io.py`, `tests/`.
 - `frontend/` static UI: `index.html`, `static/js/*.js`, `static/css/app.css`, `static/vendor/fontawesome/`.
-- `config.ini` (settings), `data/` (cameras.json, thumbs/), `captures/` (output). `data/`, `captures/`, models are git-ignored.
+- `config.ini` (settings), `data/` (cameras.json; thumbnails are never stored), `captures/` (output). `data/`, `captures/`, models are git-ignored.
 
 ## Run and test
 ```bash

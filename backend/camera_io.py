@@ -69,6 +69,41 @@ def url_endpoint(url):
         return None
 
 
+STREAM_SCHEMES = ("rtsp", "rtsps", "http", "https", "rtmp")
+_URL_HELP = "Use a stream URL like rtsp://user:password@192.168.1.10:554/stream, or the path of an existing video file"
+_HOSTPORT = re.compile(r"^(\[[0-9A-Fa-f:.]+\]|[^\s:/\[\]]+)(?::(\d+))?$")
+
+
+def validate_camera_url(url) -> str:
+    """The cleaned camera source, or ValueError with a message for the user.
+
+    Accepts rtsp/rtsps/http/https/rtmp URLs with a host (and a valid port), or the path of an existing video file
+    (handy for testing). The authority is split on the LAST '@' so passwords may contain '@', '#', '/' or '?'."""
+    s = str(url or "").strip()
+    m = re.match(r"^([A-Za-z][A-Za-z0-9+.\-]*)://(.*)$", s)
+    if m and m.group(1).lower() in STREAM_SCHEMES:
+        rest = m.group(2)
+        at = rest.rfind("@")
+        hostport = re.split(r"[/?#]", rest[at + 1:], maxsplit=1)[0]
+        hp = _HOSTPORT.match(hostport)
+        if hp and (hp.group(2) is None or 1 <= int(hp.group(2)) <= 65535):
+            return s
+        raise ValueError(f"'{mask_host_only(s)}' has no valid host or port. {_URL_HELP}")
+    if not m and s and os.path.isfile(s):
+        return s
+    raise ValueError(f"Not a camera URL or an existing video file. {_URL_HELP}")
+
+
+def mask_host_only(url) -> str:
+    """The URL without its credentials (error messages must never echo a password)."""
+    m = re.match(r"^([A-Za-z][A-Za-z0-9+.\-]*://)(.*)$", url)
+    if not m:
+        return url
+    rest = m.group(2)
+    at = rest.rfind("@")
+    return m.group(1) + (rest[at + 1:] if at >= 0 else rest)
+
+
 def check_port(host, port, timeout=4.0):
     """None if a TCP connection works; otherwise a human-readable reason."""
     s = socket.socket()

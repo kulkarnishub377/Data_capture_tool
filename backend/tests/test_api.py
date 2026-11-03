@@ -311,8 +311,11 @@ def test_recent_and_thumb_endpoints(env):
     r = c.get("/api/recent?limit=5").get_json()
     assert len(r["items"]) == 1 and r["items"][0]["class"] == "car"
     t = c.get(f"/api/thumb/{rel}?w=64")
-    assert t.status_code == 200 and t.mimetype == "image/jpeg"
+    assert t.status_code == 200 and t.mimetype == "image/jpeg" and t.data[:2] == b"\xff\xd8"
+    assert "max-age" in t.headers["Cache-Control"]                  # the browser may keep it; the server keeps nothing
+    assert not (tmp / "data" / "thumbs").exists()
     assert c.get("/api/thumb/..%2Fconfig.ini").status_code in (400, 404)
+    assert c.get("/api/thumb/Cam-01/2026-11-02/frame/none.jpg").status_code == 404
 
 
 def test_status_reports_restarting_state_during_restart(env):
@@ -360,3 +363,32 @@ def test_stop_all_stops_every_running_camera(env):
     r = c.post("/api/capture/stop-all").get_json()
     assert r["stopped"] == 2 and not any(w.running for w in FakeWorker.instances)
     assert c.post("/api/capture/stop-all").get_json()["stopped"] == 0
+
+
+def test_gallery_delete_batch(env):
+    c, tmp = env
+    p1 = _make_capture(tmp)
+    rel1 = p1.relative_to(tmp / "captures").as_posix()
+    r = c.post("/api/captures/delete-batch", json={"paths": [rel1]})
+    assert r.status_code == 200 and r.get_json()["deleted"] == 1
+    assert not p1.exists()
+
+
+def test_gallery_search_and_batch_delete_validation(env):
+    c, tmp = env
+    p = _make_capture(tmp)
+    assert c.get("/api/captures?q=CAR").get_json()["total"] == 1
+    assert c.get("/api/captures?q=bus").get_json()["total"] == 0
+    assert c.post("/api/captures/delete-batch", json={"paths": "x"}).status_code == 400
+    assert c.post("/api/captures/delete-batch", json={"paths": ["x"] * 5001}).status_code == 400
+    rel = p.relative_to(tmp / "captures").as_posix()
+    r = c.post("/api/captures/delete-batch", json={"paths": [rel, "Cam-01/none.jpg"]}).get_json()
+    assert r["deleted"] == 1 and len(r["errors"]) == 1
+
+
+def test_a_deleted_image_has_no_thumbnail_any_more(env):
+    c, tmp = env
+    rel = _make_capture(tmp).relative_to(tmp / "captures").as_posix()
+    assert c.get(f"/api/thumb/{rel}?w=200").status_code == 200
+    c.delete(f"/api/captures/{rel}")
+    assert c.get(f"/api/thumb/{rel}?w=200").status_code == 404

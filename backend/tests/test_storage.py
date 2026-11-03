@@ -164,19 +164,69 @@ def test_recent_captures_respects_limit_and_frame_only(tmp_path):
     assert len(items) == 3 and {i["kind"] for i in items} == {"frame"}
 
 
-def test_thumbnail_is_small_and_cached(tmp_path):
+@pytest.mark.parametrize("size, width", [((1080, 1920), 320), ((720, 1280), 320), ((100, 150), 320), ((1080, 1920), 1280)])
+def test_thumbnail_is_made_in_memory_and_nothing_is_written(tmp_path, size, width):
     import cv2
-    big = np.full((720, 1280, 3), 90, dtype="uint8")
+    big = np.full((*size, 3), 90, dtype="uint8")
     p = storage.save_capture(tmp_path / "cap", "Cam-01", "car", TS, big, (10, 10, 50, 50), "frame",
                              95, 0.1, 0.4, None)[0]
     rel = p.relative_to(tmp_path / "cap").as_posix()
-    t1 = storage.make_thumbnail(tmp_path / "cap", rel, tmp_path / "thumbs", 320)
-    assert cv2.imread(str(t1)).shape[1] == 320
-    m1 = t1.stat().st_mtime_ns
-    assert storage.make_thumbnail(tmp_path / "cap", rel, tmp_path / "thumbs", 320) == t1
-    assert t1.stat().st_mtime_ns == m1  # served from cache, not re-encoded
+    before = sorted(x for x in tmp_path.rglob("*"))
+    data = storage.make_thumbnail(tmp_path / "cap", rel, width)
+    assert isinstance(data, bytes) and data[:2] == b"\xff\xd8"              # a JPEG
+    img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    assert img.shape[1] == min(width, size[1])                                   # never upscaled
+    assert abs(img.shape[0] / img.shape[1] - size[0] / size[1]) < 0.02          # aspect kept
+    assert sorted(x for x in tmp_path.rglob("*")) == before                      # no file, no cache folder
 
 
-def test_thumbnail_rejects_path_escape(tmp_path):
+def test_thumbnail_rejects_path_escape_and_missing_files(tmp_path):
     with pytest.raises(ValueError):
-        storage.make_thumbnail(tmp_path, "../x.jpg", tmp_path / "t", 200)
+        storage.make_thumbnail(tmp_path, "../x.jpg", 200)
+    with pytest.raises(FileNotFoundError):
+        storage.make_thumbnail(tmp_path, "Cam-01/2026-11-02/frame/none.jpg", 200)
+
+
+def test_list_captures_multi_class_and_kind_and_batch_delete(tmp_path):
+    storage.save_capture(tmp_path, "Cam-01", "car", TS, _frame(), (10, 10, 50, 50), "frame", 95, 0.15, 0.4, None)
+    storage.save_capture(tmp_path, "Cam-01", "bus", TS, _frame(), (10, 10, 50, 50), "crop", 95, 0.15, 0.4, None)
+    storage.save_capture(tmp_path, "Cam-01", "truck", TS, _frame(), (10, 10, 50, 50), "frame", 95, 0.15, 0.4, None)
+
+    # Multi-class
+    res = storage.list_captures(tmp_path, cls="car,truck")
+    assert res["total"] == 2
+    assert {i["class"] for i in res["items"]} == {"car", "truck"}
+    assert set(res["categories"]) == {"bus", "car", "truck"}
+
+    # Kind filter
+    crop_res = storage.list_captures(tmp_path, kind="crop")
+    assert crop_res["total"] == 1 and crop_res["items"][0]["class"] == "bus"
+
+    # Batch delete
+    paths = [i["path"] for i in res["items"]]
+    deleted, errors = storage.delete_captures_batch(tmp_path, paths)
+    assert deleted == 2 and errors == []
+    assert storage.list_captures(tmp_path)["total"] == 1
+
+
+def test_list_captures_search_runs_over_all_pages_not_just_one(tmp_path):
+    for i in range(5):
+        storage.save_capture(tmp_path, "Cam-01", "car", datetime(2026, 11, 2, 10, 0, i), _frame(),
+                             (10, 10, 50, 50), "frame", 95, 0.15, 0.4, None)
+    storage.save_capture(tmp_path, "Gate-7", "auto_rickshaw", datetime(2026, 11, 1, 8, 0, 0), _frame(),
+                         (10, 10, 50, 50), "frame", 95, 0.15, 0.4, None)
+    res = storage.list_captures(tmp_path, q="RICKSHAW", per_page=2)       # the match is the oldest (last page)
+    assert res["total"] == 1 and res["items"][0]["camera"] == "Gate-7"
+    assert storage.list_captures(tmp_path, q="gate", per_page=2)["total"] == 1             # camera
+    assert storage.list_captures(tmp_path, q="2026-11-02 10:00:03")["total"] == 1          # time text
+    assert storage.list_captures(tmp_path, q="  ")["total"] == 6                           # blank = no filter
+
+
+def test_batch_delete_reports_bad_entries_and_deletes_the_rest(tmp_path):
+    p = _save(tmp_path, "frame")[0]
+    rel = p.relative_to(tmp_path).as_posix()
+    deleted, errors = storage.delete_captures_batch(tmp_path, [rel, "Cam-01/x/frame/missing.jpg", "../evil.jpg", 42])
+    assert deleted == 1 and not p.exists()
+    assert len(errors) == 3 and all(isinstance(e, str) for e in errors)
+
+

@@ -93,16 +93,119 @@
 
   <!-- ================= GALLERY ================= -->
   <section id="tab-gallery" class="tab">
-    <div class="bar">
-      <label>Camera <select id="g-cam"><option value="">All</option></select></label>
-      <label>Date <input type="date" id="g-date"></label>
-      <label>Class <select id="g-cls"><option value="">All</option></select></label>
-      <button id="g-refresh">Refresh</button>
-      <span class="hint" id="g-count"></span>
+    <!-- Gallery Top Bar -->
+    <div class="g-topbar panel">
+      <div class="g-title-block">
+        <span class="ico"><i class="fa-solid fa-images"></i></span>
+        <div>
+          <h2>Captured Gallery</h2>
+          <span class="hint" id="g-count-text">Loading captures...</span>
+        </div>
+      </div>
+      <div class="g-topbar-controls">
+        <label class="g-ctrl-label" title="Items per page">
+          <i class="fa-solid fa-layer-group"></i>
+          <select id="g-per-page">
+            <option value="30">30 / page</option>
+            <option value="60" selected>60 / page</option>
+            <option value="120">120 / page</option>
+          </select>
+        </label>
+        <label class="g-ctrl-label" title="Sort order">
+          <i class="fa-solid fa-arrow-down-short-wide"></i>
+          <select id="g-sort">
+            <option value="newest" selected>Newest first</option>
+            <option value="oldest">Oldest first</option>
+          </select>
+        </label>
+        <button type="button" id="g-refresh" class="btn" title="Refresh gallery list"><i class="fa-solid fa-rotate-right"></i> Refresh</button>
+        <button type="button" id="g-reset-filters" class="btn" title="Clear all filters"><i class="fa-solid fa-filter-circle-xmark"></i> Reset</button>
+      </div>
     </div>
-    <div id="g-grid" class="thumbs"></div>
-    <div class="bar pager"><button id="g-prev">Prev</button><span id="g-page"></span><button id="g-next">Next</button></div>
+
+    <!-- Filter Card -->
+    <div class="g-filters panel">
+      <div class="g-filters-main">
+        <div class="g-filter-group">
+          <label for="g-cam"><i class="fa-solid fa-camera"></i> Camera</label>
+          <select id="g-cam"><option value="">All cameras</option></select>
+        </div>
+
+        <div class="g-filter-group">
+          <label for="g-date"><i class="fa-solid fa-calendar-days"></i> Date</label>
+          <div class="g-date-wrap">
+            <input type="date" id="g-date">
+            <button type="button" id="g-date-today" class="btn sm" title="Filter to today">Today</button>
+            <button type="button" id="g-date-clear" class="btn sm" title="Clear date filter"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+        </div>
+
+        <div class="g-filter-group">
+          <label><i class="fa-solid fa-crop-simple"></i> Image type</label>
+          <div class="seg" id="g-seg-kind" role="radiogroup" aria-label="Filter image type">
+            <button type="button" role="radio" data-value="" aria-checked="true">All</button>
+            <button type="button" role="radio" data-value="frame" aria-checked="false">Full frame</button>
+            <button type="button" role="radio" data-value="crop" aria-checked="false">Crop</button>
+          </div>
+        </div>
+
+        <div class="g-filter-group g-search-group">
+          <label for="g-search"><i class="fa-solid fa-magnifying-glass"></i> Search</label>
+          <input type="search" id="g-search" placeholder="Search name, camera, class or time...">
+        </div>
+      </div>
+
+      <!-- Categories Checkbox Filter Section -->
+      <div class="g-category-section">
+        <div class="g-cat-header">
+          <span class="g-cat-title"><i class="fa-solid fa-tags"></i> Categories / Classes:</span>
+          <div class="g-cat-actions">
+            <button type="button" id="g-cat-all" class="btn sm"><i class="fa-solid fa-check-double"></i> Select all</button>
+            <button type="button" id="g-cat-none" class="btn sm"><i class="fa-regular fa-square"></i> Clear all</button>
+            <span id="g-cat-count" class="badge"></span>
+          </div>
+        </div>
+        <div id="g-category-list" class="g-cat-chips" role="group" aria-label="Categories filter"></div>
+      </div>
+    </div>
+
+    <!-- Batch Selection Toolbar (visible when 1+ images are checked) -->
+    <div id="g-batch-bar" class="g-batch-bar panel" hidden>
+      <div class="g-batch-info">
+        <i class="fa-solid fa-circle-check"></i>
+        <span><strong id="g-batch-count">0</strong> images selected</span>
+      </div>
+      <div class="g-batch-actions">
+        <button type="button" id="g-select-all-page" class="btn sm"><i class="fa-regular fa-square-check"></i> Select page</button>
+        <button type="button" id="g-select-none" class="btn sm"><i class="fa-regular fa-square"></i> Deselect all</button>
+        <button type="button" id="g-delete-selected" class="btn danger sm"><i class="fa-solid fa-trash"></i> Delete selected (<span id="g-delete-count">0</span>)</button>
+      </div>
+    </div>
+
+    <!-- Gallery Grid -->
+    <div id="g-grid" class="g-cards-grid"></div>
+
+    <!-- Empty State -->
+    <div id="g-empty" class="panel empty" hidden>
+      <i class="fa-solid fa-images fa-2xl g-empty-icon"></i>
+      <p class="g-empty-title" id="g-empty-title">No captures found</p>
+      <p class="hint g-empty-hint" id="g-empty-hint">Try adjusting your camera, category, or date filters.</p>
+      <button type="button" id="g-empty-reset" class="btn primary sm"><i class="fa-solid fa-filter-circle-xmark"></i> Clear filters</button>
+    </div>
+
+    <!-- Pagination Footer -->
+    <div class="g-pagination-bar">
+      <div class="g-pager-info" id="g-page-summary">Page 1 of 1</div>
+      <div class="bar pager">
+        <button type="button" id="g-first" class="btn sm" title="First page"><i class="fa-solid fa-angles-left"></i></button>
+        <button type="button" id="g-prev" class="btn sm"><i class="fa-solid fa-chevron-left"></i> Prev</button>
+        <span id="g-page" class="pill sm">Page 1 / 1</span>
+        <button type="button" id="g-next" class="btn sm">Next <i class="fa-solid fa-chevron-right"></i></button>
+        <button type="button" id="g-last" class="btn sm" title="Last page"><i class="fa-solid fa-angles-right"></i></button>
+      </div>
+    </div>
   </section>
+
   <!-- ================= SETTINGS ================= -->
   <section id="tab-settings" class="tab">
     <div class="savebar">
@@ -310,9 +413,37 @@
   </section>
 </main>
 
-<div id="lightbox" hidden>
-  <img id="lb-img" alt="">
-  <div class="lb-bar"><span id="lb-name"></span><button id="lb-del" class="danger">Delete</button><button id="lb-close">Close</button></div>
+<!-- Lightbox / Modal Image Viewer with Next/Prev and Keyboard Navigation -->
+<div id="lightbox" hidden role="dialog" aria-modal="true" aria-label="Image viewer">
+  <div class="lb-shell">
+    <div class="lb-header">
+      <div class="lb-meta-left">
+        <span id="lb-counter" class="badge"></span>
+        <span id="lb-camera" class="pill sm"></span>
+        <span id="lb-class" class="badge"></span>
+        <span id="lb-kind" class="badge"></span>
+      </div>
+      <div class="lb-meta-right">
+        <a id="lb-full" class="btn sm" target="_blank" rel="noopener" title="Open full resolution in new tab"><i class="fa-solid fa-arrow-up-right-from-square"></i> Full size</a>
+        <button type="button" id="lb-del" class="btn danger sm" title="Delete image (Delete)"><i class="fa-solid fa-trash"></i> Delete</button>
+        <button type="button" id="lb-close" class="btn sm" title="Close (Esc)" aria-label="Close viewer"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+    </div>
+
+    <div class="lb-body">
+      <button type="button" id="lb-prev" class="lb-nav lb-prev" title="Previous image (Left Arrow)" aria-label="Previous image"><i class="fa-solid fa-chevron-left"></i></button>
+      <div class="lb-stage">
+        <img id="lb-img" alt="">
+      </div>
+      <button type="button" id="lb-next" class="lb-nav lb-next" title="Next image (Right Arrow)" aria-label="Next image"><i class="fa-solid fa-chevron-right"></i></button>
+    </div>
+
+    <div class="lb-footer">
+      <span id="lb-name" class="lb-title"></span>
+      <span class="spacer"></span>
+      <span class="hint lb-shortcuts"><kbd>←</kbd> <kbd>→</kbd> Navigate &bull; <kbd>Esc</kbd> Close &bull; <kbd>Del</kbd> Delete</span>
+    </div>
+  </div>
 </div>
 
 <script src="/static/js/app.js"></script>
